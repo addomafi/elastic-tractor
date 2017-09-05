@@ -1,0 +1,26 @@
+{
+  "name": "elastictractor",
+  "version": "1.0.0",
+  "description": "Reindex tool",
+  "main": "elastictractor.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "tractor",
+    "consolidator",
+    "elasticsearch",
+    "reindex"
+  ],
+  "author": "Adauto Martins <adauto.martins@ideotech.com.br>",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "aws-sdk": "^2.91.0",
+    "elasticsearch": "^13.2.0",
+    "extend": "^3.0.1",
+    "lodash": "^4.17.4",
+    "md5": "^2.2.1",
+    "node-grok": "^2.0.3",
+    "optimist": "^0.6.1"
+  }
+}
