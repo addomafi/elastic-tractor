@@ -27,12 +27,17 @@ var elastictractor = function () {
 						console.log("Loaded");
 						grok.loadDefault(function (err, patterns) {
 							if (err) reject(err);
-							else  {
-								self.config = extend({
-									loadTime: process.hrtime()
-								}, JSON.parse(data["Body"].toString()));
-								self.config.grokPatterns = patterns
-								resolve(self.config);
+							else {
+								patterns.load("patterns/custom", function (err, newPatterns) {
+									if (err) reject(err);
+									else {
+										self.config = extend({
+											loadTime: process.hrtime()
+										}, JSON.parse(data["Body"].toString()));
+										self.config.grokPatterns = newPatterns
+										resolve(self.config);
+									}
+								});
 							}
 						});
 					}
@@ -285,7 +290,7 @@ var elastictractor = function () {
 	};
 }
 
-elastictractor.prototype.process = function (index, documentId) {
+elastictractor.prototype.reindex = function (index, documentId) {
 	var self = this
 	return new Promise((resolve, reject) => {
 		self._getDocumentById(index, documentId).then(data => {
