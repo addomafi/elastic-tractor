@@ -471,28 +471,49 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 		// Load configuration
 		self._init().then(config => {
 			// Keep only first pattern related to this CloudWatch logs
-			var pattern = _.head(_.filter(config.patterns, x => x.config && _.indexOf(x.config.source, "aws:awsLogs") > -1 && x.config.field && self.matches(x.config.field.regex, awsLogEvent[x.config.field.name])));
-			// Keep only elegible index
-			pattern.config.index = _.head(_.filter(pattern.config.field.index, x => self.matches(x.regex, awsLogEvent[x.name])))
+			var patterns = _.filter(config.patterns, x => x.config && _.indexOf(x.config.source, "aws:awsLogs") > -1 && x.config.field && self.matches(x.config.field.regex, awsLogEvent[x.config.field.name]))
 
-			var logs = awsLogEvent.logEvents
-			var parsing = [];
-			logs.forEach(data => {
-				data.source = awsLogEvent.logGroup
-				parsing.push(self._parse(data, { config: pattern.config, regexp: pattern.regex}));
+			var patternsInProcessing = []
+			patterns.map(pattern => {
+				patternsInProcessing.push(new Promise((resolve, reject) => {
+					// Keep only elegible index
+					pattern.config.index = _.head(_.filter(pattern.config.field.index, x => self.matches(x.regex, awsLogEvent[x.name])))
+
+					var logs = awsLogEvent.logEvents
+					var parsing = [];
+					logs.forEach(data => {
+						data.source = awsLogEvent.logGroup
+						parsing.push(self._parse(data, { config: pattern.config, regexp: pattern.regex}));
+					})
+					// Get results after pattern was applied
+					Promise.all(parsing).then(results => {
+						// Keep only valid data
+						results = _.filter(results, x => x.results.length)
+
+						var body = [];
+						// Contructs the body object to foward to elasticsearch
+						results.forEach(function(item) {
+							body.push({ index:  { _index: item.index, _type: "metric" } });
+							body.push(_.head(item.results));
+						});
+						resolve(body);
+						parsing = null;
+						all = null;
+						patterns = null;
+					}).catch(err => {
+						reject(err);
+						parsing = null;
+						all = null;
+						patterns = null;
+					});
+				}))
 			})
-			// Get results after pattern was applied
-			Promise.all(parsing).then(results => {
-				// Keep only valid data
-				results = _.filter(results, x => x.results.length)
 
-				var body = [];
-				// Contructs the body object to foward to elasticsearch
-				results.forEach(function(item) {
-					body.push({ index:  { _index: item.index, _type: "metric" } });
-					body.push(item);
-				});
-
+			Promise.all(patternsInProcessing).then(body => {
+				// Concat all results
+				body = body.reduce(function(a, b) {
+					return a.concat(b);
+				}, []);
 				//  Send documents to elasticsearch, if has one
 				if (body.length > 0) {
 					self.client.bulk({
@@ -506,10 +527,6 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 						}
 					});
 				}
-
-				parsing = null;
-				all = null;
-				patterns = null;
 			}).catch(err => {
 				reject(err);
 				parsing = null;
