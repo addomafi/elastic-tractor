@@ -1,19 +1,20 @@
 let es = require('elasticsearch')
 let grok = require('node-grok')
-var _ = require('lodash');
+let _ = require('lodash');
 let extend = require('extend');
 let AWS = require('aws-sdk');
 let s3 = new AWS.S3();
-var OnigRegExp = require('oniguruma').OnigRegExp;
-var md5 = require('md5');
-var moment = require('moment');
+let firehose = new AWS.Firehose();
+let OnigRegExp = require('oniguruma').OnigRegExp;
+let md5 = require('md5');
+let moment = require('moment');
 // var heapdump = require('heapdump');
 
 var elastictractor = function () {
 	var self = this
 
 	var template = function(tpl, args) {
-		var value = {v: args}
+		var value = {v: args, require: require}
 		var keys = Object.keys(value),
 				fn = new Function(...keys,
 					'return `' + tpl.replace(/`/g, '\\`') + '`');
@@ -264,12 +265,25 @@ var elastictractor = function () {
 					}
 				}
 
-				// Define index name
-				var index;
-				if (filtered.length && filtered[0].hasError) {
-					index = `${pattern.config.index.prefix}error-${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
-				} else {
-					index = `${pattern.config.index.prefix}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+				var parsedObj = {results: filtered};
+
+				// Check output type
+				if (pattern.config.output) {
+					parsedObj.output = [];
+					pattern.config.output.forEach(item => {
+						if (item.type === "aws:kinesis") {
+							parsedObj.output.push(item)
+						} else if (item.type === "elasticsearch") {
+							// Define index name
+							var index;
+							if (filtered.length && filtered[0].hasError) {
+								index = `${item.prefix}error-${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+							} else {
+								index = `${item.prefix}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+							}
+							parsedObj.output.push({index: index, type: item.type, id: data["_id"], url: item.url})
+						}
+					})
 				}
 
 				// Apply additional extractor if has one
@@ -281,13 +295,14 @@ var elastictractor = function () {
 					// Wait for all promisses be finished
 					Promise.all(regexInProcessing).then(results => {
 						results.forEach(item => {
-							extend(filtered[0], item)
+							extend(parsedObj.results[0], item)
 						});
-
-						resolve({index: index, type: pattern.config.index.type, id: data["_id"], results: filtered});
+						resolve(parsedObj)
+					}).catch(err => {
+						reject(err)
 					})
 				} else {
-					resolve({index: index, type: pattern.config.index.type, id: data["_id"], results: filtered});
+					resolve(parsedObj)
 				}
 			}).catch(err => {
 				reject(err);
@@ -477,7 +492,7 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 			patterns.map(pattern => {
 				patternsInProcessing.push(new Promise((resolve, reject) => {
 					// Keep only elegible index
-					pattern.config.index = _.head(_.filter(pattern.config.field.index, x => self.matches(x.regex, awsLogEvent[x.name])))
+					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, awsLogEvent[x.name]))
 
 					var logs = awsLogEvent.logEvents
 					var parsing = [];
@@ -489,14 +504,7 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 					Promise.all(parsing).then(results => {
 						// Keep only valid data
 						results = _.filter(results, x => x.results.length)
-
-						var body = [];
-						// Contructs the body object to foward to elasticsearch
-						results.forEach(function(item) {
-							body.push({ index:  { _index: item.index, _type: "metric" } });
-							body.push(_.head(item.results));
-						});
-						resolve(body);
+						resolve(results);
 						parsing = null;
 						all = null;
 						patterns = null;
@@ -509,24 +517,74 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 				}))
 			})
 
-			Promise.all(patternsInProcessing).then(body => {
+			Promise.all(patternsInProcessing).then(results => {
 				// Concat all results
-				body = body.reduce(function(a, b) {
+				results = results.reduce(function(a, b) {
 					return a.concat(b);
 				}, []);
-				//  Send documents to elasticsearch, if has one
-				if (body.length > 0) {
-					self.client.bulk({
-						body: body
-					}, function (error, response) {
-						if (error) {
-							console.log(error);
-							reject(error);
-						} else {
-							resolve(response);
+
+				var output = {};
+				results.forEach(result => {
+					result.output.forEach(out => {
+						if (out.type === "aws:kinesis") {
+							// if array wasn't initialized
+							if (!output.kinesis) {
+								output.kinesis = {
+								   "DeliveryStreamName": out.arn,
+								   "Records": []
+								};
+							}
+							output.kinesis["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
+						} else if (out.type === "elasticsearch") {
+							// if array wasn't initialized
+							if (!output.elk) output.elk = [];
+							// Contructs the body object to foward to elasticsearch
+							output.elk.push({ index:  { _index: out.index, _type: "metric" } });
+							output.elk.push(_.head(result.results));
 						}
-					});
-				}
+					})
+				});
+
+				var processingOutput = []
+				Object.keys(output).forEach(item => {
+					if (item === "elk") {
+						//  Send documents to elasticsearch, if has one
+						if (output[item].length > 0) {
+							processingOutput.push(new Promise((resolve, reject) => {
+								self.client.bulk({
+									body: output.elk
+								}, function (error, response) {
+									if (error) {
+										console.log(error);
+										reject(error);
+									} else {
+										resolve(response);
+									}
+								});
+							}))
+						}
+					} else if (item === "kinesis") {
+						processingOutput.push(new Promise((resolve, reject) => {
+							firehose.putRecordBatch(output[item], function(err, data) {
+							  if (err) {
+									console.log(err, err.stack);
+									reject(err);
+								} else {
+									resolve(data);
+								}
+							});
+						}))
+					}
+				})
+
+				Promise.all(processingOutput).then(results => {
+					resolve(results);
+				}).catch(err => {
+					reject(err);
+					parsing = null;
+					all = null;
+					patterns = null;
+				})
 			}).catch(err => {
 				reject(err);
 				parsing = null;
