@@ -39,7 +39,7 @@ var elastictractor = function () {
 				self.client.search({
     			index: ".tractor",
     			body: {
-            "size": 10000
+            "size": 1000
           }
     		}).then(function(body) {
           var details = [];
