@@ -570,6 +570,7 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 									console.log(err, err.stack);
 									reject(err);
 								} else {
+									console.log(`Was sent to Kinesis ${output[item]["Records"].length} records`)
 									resolve(data);
 								}
 							});
@@ -591,6 +592,8 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 				all = null;
 				patterns = null;
 			});
+		}).catch(err => {
+			reject(err);
 		});
 	})
 };
