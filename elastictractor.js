@@ -570,6 +570,9 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 									console.log(err, err.stack);
 									reject(err);
 								} else {
+									if (data.FailedPutCount && data.FailedPutCount > 0) {
+										console.log(`Some records wasn't delivered, a total of ${data.FailedPutCount}. ${JSON.stringify(data)}`)
+									}
 									console.log(`Was sent to Kinesis ${output[item]["Records"].length} records`)
 									resolve(data);
 								}
