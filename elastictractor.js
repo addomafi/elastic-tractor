@@ -4,6 +4,7 @@ let _ = require('lodash');
 let extend = require('extend');
 let AWS = require('aws-sdk');
 let s3 = new AWS.S3();
+let kinesis = new AWS.Kinesis();
 let firehose = new AWS.Firehose();
 let OnigRegExp = require('oniguruma').OnigRegExp;
 let md5 = require('md5');
@@ -271,7 +272,7 @@ var elastictractor = function () {
 				if (pattern.config.output) {
 					parsedObj.output = [];
 					pattern.config.output.forEach(item => {
-						if (item.type === "aws:kinesis") {
+						if (item.type === "aws:firehose" || item.type === "aws:kinesis") {
 							parsedObj.output.push(item)
 						} else if (item.type === "elasticsearch") {
 							// Define index name
@@ -528,13 +529,24 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 					result.output.forEach(out => {
 						if (out.type === "aws:kinesis") {
 							// if array wasn't initialized
-							if (!output.kinesis) {
-								output.kinesis = {
+							if (!output.kinesis || !output.kinesis[out.arn]) {
+								if (!output.kinesis) output.kinesis = {};
+								output.kinesis[out.arn] = {
+								   "StreamName": out.arn,
+								   "Records": []
+								};
+							}
+							output.kinesis[out.arn]["Records"].push({ "PartitionKey": "results", "Data": JSON.stringify(_.head(result.results)) });
+						} else if (out.type === "aws:firehose") {
+							// if array wasn't initialized
+							if (!output.firehose || !output.firehose[out.arn]) {
+								if (!output.firehose) output.firehose = {};
+								output.firehose[out.arn] = {
 								   "DeliveryStreamName": out.arn,
 								   "Records": []
 								};
 							}
-							output.kinesis["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
+							output.firehose[out.arn]["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
 						} else if (out.type === "elasticsearch") {
 							// if array wasn't initialized
 							if (!output.elk) output.elk = [];
@@ -563,21 +575,32 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 								});
 							}))
 						}
-					} else if (item === "kinesis") {
-						processingOutput.push(new Promise((resolve, reject) => {
-							firehose.putRecordBatch(output[item], function(err, data) {
-							  if (err) {
-									console.log(err, err.stack);
-									reject(err);
-								} else {
-									if (data.FailedPutCount && data.FailedPutCount > 0) {
-										console.log(`Some records wasn't delivered, a total of ${data.FailedPutCount}. ${JSON.stringify(data)}`)
+					} else if (item === "firehose" || item === "kinesis") {
+
+						Object.keys(output[item]).forEach(stream => {
+							processingOutput.push(new Promise((resolve, reject) => {
+								var failureName = item === "firehose" ? "FailedPutCount" : "FailedRecordCount";
+
+								var callback = function(err, data) {
+									if (err) {
+										console.log(err, err.stack);
+										reject(err);
+									} else {
+										if (data[failureName] && data[failureName] > 0) {
+											console.log(`Some records wasn't delivered, a total of ${data[failureName]}. ${JSON.stringify(data)}`)
+										}
+										console.log(`Was sent to ${item} ${output[item][stream]["Records"].length} records`)
+										resolve(data);
 									}
-									console.log(`Was sent to Kinesis ${output[item]["Records"].length} records`)
-									resolve(data);
+								};
+
+								if (item === "firehose") {
+									firehose.putRecordBatch(output[item][stream], callback);
+								} else {
+									kinesis.putRecords(output[item][stream], callback);
 								}
-							});
-						}))
+							}))
+						})
 					}
 				})
 
