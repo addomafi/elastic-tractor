@@ -253,10 +253,12 @@ var elastictractor = function () {
 										item[key].map(regexItem => {
 											try {
 												var value = template(`\$\{v.${key}\}`, filtered[0]);
-												additionalExtractor.push({
-													"data": value,
-													"regex": regexItem
-												});
+												if (value !== "undefined") {
+													additionalExtractor.push({
+														"data": value,
+														"regex": regexItem
+													});
+												}
 											} catch (e) {}
 										})
 									})
@@ -295,7 +297,10 @@ var elastictractor = function () {
 					})
 					// Wait for all promisses be finished
 					Promise.all(regexInProcessing).then(results => {
-						results.forEach(item => {
+						// Got only valid results
+						var filtered = _.filter(results, x => x);
+
+						filtered.forEach(item => {
 							extend(parsedObj.results[0], item)
 						});
 						resolve(parsedObj)
