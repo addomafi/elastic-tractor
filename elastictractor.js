@@ -477,8 +477,8 @@ var elastictractor = function () {
 		var self = this
 		return new Promise((resolve, reject) => {
 			var patternsInProcessing = []
-			config.patterns.map(pattern => {
-				patternsInProcessing.push(PromiseBB.map(chunks, function(chunk) {
+			// config.patterns.map(pattern => {
+				patternsInProcessing.push(PromiseBB.map(config.patterns, function(chunk) {
 						return new Promise((resolve, reject) => {
 						// Keep only elegible index
 						pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
@@ -502,8 +502,8 @@ var elastictractor = function () {
 							parsing = null;
 						});
 					})
-				}, {concurrency: 100})
-			})
+				}, {concurrency: 100}))
+			// })
 
 			Promise.all(patternsInProcessing).then(results => {
 				// Concat all results
