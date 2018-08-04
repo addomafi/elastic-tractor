@@ -16,6 +16,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "aws-sdk": "^2.91.0",
+    "bluebird": "^3.5.1",
     "byline": "^5.0.0",
     "elasticsearch": "^13.2.0",
     "extend": "^3.0.1",
@@ -24,6 +25,7 @@
     "moment": "^2.19.3",
     "node-grok": "^2.0.3",
     "oniguruma": "^7.0.0",
-    "optimist": "^0.6.1"
+    "optimist": "^0.6.1",
+    "stream": "0.0.2"
   }
 }

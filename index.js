@@ -21,6 +21,7 @@ exports.handler = function(event, context, callback) {
             tractor.processS3(evtRecord).then(results => {
               callback(null, "Success");
             }).catch(err => {
+              delete evtRecord.logs;
               console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
               callback(null, "Success");
             });

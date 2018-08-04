@@ -9,6 +9,10 @@ let firehose = new AWS.Firehose();
 let OnigRegExp = require('oniguruma').OnigRegExp;
 let md5 = require('md5');
 let moment = require('moment');
+var LineStream = require('byline').LineStream;
+var stream = require('stream');
+const zlib = require('zlib');
+var PromiseBB = require("bluebird");
 // var heapdump = require('heapdump');
 
 var elastictractor = function () {
@@ -196,7 +200,7 @@ var elastictractor = function () {
 			var regexInProcessing = [];
 			Object.keys(pattern.regexp).forEach( key => {
 				pattern.regexp[key].map(function(regex) {
-					regexInProcessing.push(self._parseRegex(regex, data[key], moment(data.timestamp).format('x')));
+					regexInProcessing.push(self._parseRegex(regex, data[key], data.timestamp ? moment(data.timestamp).format('x') : undefined));
 				})
 			});
 			// Wait for all promisses be finished
@@ -235,6 +239,9 @@ var elastictractor = function () {
 							if (onSuccess.add) {
 								Object.keys(onSuccess.add).map(key => {
 									filtered[0][key] = template(onSuccess.add[key], filtered[0])
+									if (key === "timestamp") {
+										data.timestamp = filtered[0][key]
+									}
 								})
 							}
 							if (onSuccess.delete) {
@@ -446,6 +453,160 @@ var elastictractor = function () {
 			});
 		});
 	};
+
+	self._hasConfig = function(event, type) {
+		var self = this
+		return new Promise((resolve, reject) => {
+			// Load configuration
+			self._init().then(config => {
+				// Keep only first pattern related the respective event _type
+				var patterns = _.filter(config.patterns, x => x.config && _.indexOf(x.config.source, type) > -1 && x.config.field && self.matches(x.config.field.regex, template(x.config.field.name, event)))
+				if (patterns.length > 0) {
+					config.patterns = patterns;
+					resolve(config);
+				} else {
+					reject("It's not configured.");
+				}
+			}).catch(err => {
+				reject(err);
+			})
+		})
+	}
+
+	self._processEvent = function(event, config) {
+		var self = this
+		return new Promise((resolve, reject) => {
+			var patternsInProcessing = []
+			config.patterns.map(pattern => {
+				patternsInProcessing.push(new Promise((resolve, reject) => {
+					// Keep only elegible index
+					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
+
+					var logs = event[pattern.config.field.data];
+					var parsing = [];
+					logs.forEach(data => {
+						data.source = template(pattern.config.field.name, event);
+						parsing.push(self._parse(data, { config: pattern.config, regexp: pattern.regex }));
+					})
+					// Get results after pattern was applied
+					Promise.all(parsing).then(results => {
+						// Keep only valid data
+						results = _.filter(results, x => x.results.length)
+						resolve(results);
+						parsing = null;
+					}).catch(err => {
+						reject(err);
+						parsing = null;
+					});
+				}))
+			})
+
+			Promise.all(patternsInProcessing).then(results => {
+				// Concat all results
+				results = results.reduce(function(a, b) {
+					return a.concat(b);
+				}, []);
+
+				var output = {};
+				results.forEach(result => {
+					result.output.forEach(out => {
+						if (out.type === "aws:kinesis") {
+							// if array wasn't initialized
+							if (!output.kinesis || !output.kinesis[out.arn]) {
+								if (!output.kinesis) output.kinesis = {};
+								output.kinesis[out.arn] = {
+								   "StreamName": out.arn,
+								   "Records": []
+								};
+							}
+							output.kinesis[out.arn]["Records"].push({ "PartitionKey": "results", "Data": JSON.stringify(_.head(result.results)) });
+						} else if (out.type === "aws:firehose") {
+							// if array wasn't initialized
+							if (!output.firehose || !output.firehose[out.arn]) {
+								if (!output.firehose) output.firehose = {};
+								output.firehose[out.arn] = {
+								   "DeliveryStreamName": out.arn,
+								   "Records": []
+								};
+							}
+							output.firehose[out.arn]["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
+						} else if (out.type === "elasticsearch") {
+							// if array wasn't initialized
+							if (!output.elk) output.elk = [];
+							// Contructs the body object to foward to elasticsearch
+							output.elk.push({ index:  { _index: out.index, _type: "metric" } });
+							output.elk.push(_.head(result.results));
+						}
+					})
+				});
+
+				var processingOutput = []
+				Object.keys(output).forEach(item => {
+					if (item === "elk") {
+						//  Send documents to elasticsearch, if has one
+						if (output[item].length > 0) {
+							// Split into chunk of 500 items
+							var chunks = _.chunk(output[item], 500)
+							processingOutput.push(PromiseBB.map(chunks, function(chunk) {
+								return new Promise((resolve, reject) => {
+									self.client.bulk({
+										body: chunk
+									}, function (error, response) {
+										if (error) {
+											console.log(error);
+											reject(error);
+										} else {
+											resolve(response);
+										}
+									})
+								})
+							}, {concurrency: 1}));
+						}
+					} else if (item === "firehose" || item === "kinesis") {
+
+						Object.keys(output[item]).forEach(stream => {
+							processingOutput.push(new Promise((resolve, reject) => {
+								var failureName = item === "firehose" ? "FailedPutCount" : "FailedRecordCount";
+
+								var callback = function(err, data) {
+									if (err) {
+										console.log(err, err.stack);
+										reject(err);
+									} else {
+										if (data[failureName] && data[failureName] > 0) {
+											console.log(`Some records wasn't delivered, a total of ${data[failureName]}. ${JSON.stringify(data)}`)
+										}
+										console.log(`Was sent to ${item} ${output[item][stream]["Records"].length} records`)
+										resolve(data);
+									}
+								};
+
+								if (item === "firehose") {
+									firehose.putRecordBatch(output[item][stream], callback);
+								} else {
+									kinesis.putRecords(output[item][stream], callback);
+								}
+							}))
+						})
+					}
+				})
+
+				Promise.all(processingOutput).then(results => {
+					resolve(results);
+				}).catch(err => {
+					reject(err);
+					parsing = null;
+					all = null;
+					patterns = null;
+				})
+			}).catch(err => {
+				reject(err);
+				parsing = null;
+				all = null;
+				patterns = null;
+			});
+		})
+	};
 }
 
 elastictractor.prototype.reindexESDocument = function (index, documentId) {
@@ -633,7 +794,34 @@ elastictractor.prototype.processAwsLog = function(awsLogEvent) {
 elastictractor.prototype.processS3 = function(s3Event) {
 	var self = this
 	return new Promise((resolve, reject) => {
-
+		self._hasConfig(s3Event, "aws:s3").then(config => {
+			var s3Stream = s3.getObject({Bucket: s3Event.s3.bucket.name, Key: decodeURIComponent(s3Event.s3.object.key.replace(/\+/g, ' '))}).createReadStream();
+			var lineStream = new LineStream();
+			var logs = []
+	    s3Stream
+			  .pipe(zlib.createGunzip())
+	      .pipe(lineStream)
+				// .pipe(recordStream)
+	      .on('data', function(data) {
+					logs.push({
+						message: data.toString(),
+						source: `${s3Event.s3.bucket.name}-${s3Event.s3.object.key}`
+					})
+	      }).on('end', function() {
+					if (logs.length > 0) {
+						s3Event.logs = logs;
+						self._processEvent(s3Event, config).then(response => {
+							resolve(response);
+						}).catch(err => {
+							reject(err);
+						});
+					} else {
+						reject("No log to be processed!");
+					}
+	      });
+		}).catch(err => {
+			reject(err)
+		})
 	});
 };
 
