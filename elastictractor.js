@@ -483,11 +483,13 @@ var elastictractor = function () {
 					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
 
 					var logs = event[pattern.config.field.data];
+					delete event[pattern.config.field.data];
 					var parsing = [];
 					logs.forEach(data => {
 						data.source = template(pattern.config.field.name, event);
 						parsing.push(self._parse(data, { config: pattern.config, regexp: pattern.regex }));
 					})
+					logs = [];
 					// Get results after pattern was applied
 					Promise.all(parsing).then(results => {
 						// Keep only valid data
@@ -810,6 +812,7 @@ elastictractor.prototype.processS3 = function(s3Event) {
 	      }).on('end', function() {
 					if (logs.length > 0) {
 						s3Event.logs = logs;
+						logs = [];
 						self._processEvent(s3Event, config).then(response => {
 							resolve(response);
 						}).catch(err => {
