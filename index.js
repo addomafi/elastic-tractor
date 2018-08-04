@@ -18,13 +18,18 @@ exports.handler = function(event, context, callback) {
         }
         switch(evtSrc) {
           case "aws:s3":
-            tractor.processS3(evtRecord).then(results => {
+            if (evtRecord.s3.object.size > 0) {
+              tractor.processS3(evtRecord).then(results => {
+                callback(null, "Success");
+              }).catch(err => {
+                delete evtRecord.logs;
+                console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
+                callback(null, "Success");
+              });
+            } else {
+              console.log("Log size is zero");
               callback(null, "Success");
-            }).catch(err => {
-              delete evtRecord.logs;
-              console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
-              callback(null, "Success");
-            });
+            }
             break;
           case "aws:sns":
             tractor.processSNS(evtRecord).then(results => {
