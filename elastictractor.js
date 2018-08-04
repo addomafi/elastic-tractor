@@ -477,33 +477,27 @@ var elastictractor = function () {
 		var self = this
 		return new Promise((resolve, reject) => {
 			var patternsInProcessing = []
-			// config.patterns.map(pattern => {
-				patternsInProcessing.push(PromiseBB.map(config.patterns, function(chunk) {
-						return new Promise((resolve, reject) => {
-						// Keep only elegible index
-						pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
+			config.patterns.map(pattern => {
+				patternsInProcessing.push(new Promise((resolve, reject) => {
+					// Keep only elegible index
+					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
 
-						var logs = event[pattern.config.field.data];
-						delete event[pattern.config.field.data];
-						var parsing = [];
-						logs.forEach(data => {
-							data.source = template(pattern.config.field.name, event);
-							parsing.push(self._parse(data, { config: pattern.config, regexp: pattern.regex }));
-						})
-						logs = [];
-						// Get results after pattern was applied
-						Promise.all(parsing).then(results => {
-							// Keep only valid data
-							results = _.filter(results, x => x.results.length)
-							resolve(results);
-							parsing = null;
-						}).catch(err => {
-							reject(err);
-							parsing = null;
-						});
-					})
-				}, {concurrency: 100}))
-			// })
+					var logs = event[pattern.config.field.data];
+					delete event[pattern.config.field.data];
+					PromiseBB.map(logs, function(data) {
+						data.source = template(pattern.config.field.name, event);
+						return self._parse(data, { config: pattern.config, regexp: pattern.regex });
+					}, {concurrency: 100}).then(results => {
+						// Keep only valid data
+						results = _.filter(results, x => x.results.length)
+						resolve(results);
+						parsing = null;
+					}).catch(err => {
+						reject(err);
+						parsing = null;
+					});
+				}))
+			})
 
 			Promise.all(patternsInProcessing).then(results => {
 				// Concat all results
