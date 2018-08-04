@@ -487,7 +487,7 @@ var elastictractor = function () {
 					PromiseBB.map(logs, function(data) {
 						data.source = template(pattern.config.field.name, event);
 						return self._parse(data, { config: pattern.config, regexp: pattern.regex });
-					}, {concurrency: 100}).then(results => {
+					}, {concurrency: 1000}).then(results => {
 						// Keep only valid data
 						results = _.filter(results, x => x.results.length)
 						resolve(results);
