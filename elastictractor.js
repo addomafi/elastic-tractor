@@ -807,9 +807,15 @@ elastictractor.prototype.processS3 = function(s3Event) {
 					})
 	      }).on('end', function() {
 					if (logs.length > 0) {
-						s3Event.logs = logs;
+						var events = [];
+						var chunks = _.chunk(logs, 5000)
+						chunks.map(chunk => {
+							events.push(extend({logs: chunk}}, s3Event));
+						});
 						logs = [];
-						self._processEvent(s3Event, config).then(response => {
+						PromiseBB.map(events, function(event) {
+							return self._processEvent(event, config)
+						}, {concurrency: 1}).then(response => {
 							resolve(response);
 						}).catch(err => {
 							reject(err);
