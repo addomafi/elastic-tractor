@@ -810,7 +810,7 @@ elastictractor.prototype.processS3 = function(s3Event) {
 						var events = [];
 						var chunks = _.chunk(logs, 5000)
 						chunks.map(chunk => {
-							events.push(extend({logs: chunk}}, s3Event));
+							events.push(extend({logs: chunk}, s3Event));
 						});
 						logs = [];
 						PromiseBB.map(events, function(event) {
