@@ -487,7 +487,7 @@ var elastictractor = function () {
 					PromiseBB.map(logs, function(data) {
 						data.source = template(pattern.config.field.name, event);
 						return self._parse(data, { config: pattern.config, regexp: pattern.regex });
-					}, {concurrency: 1000}).then(results => {
+					}, {concurrency: 100000}).then(results => {
 						// Keep only valid data
 						results = _.filter(results, x => x.results.length)
 						resolve(results);
@@ -544,7 +544,7 @@ var elastictractor = function () {
 						//  Send documents to elasticsearch, if has one
 						if (output[item].length > 0) {
 							// Split into chunk of 500 items
-							var chunks = _.chunk(output[item], 500)
+							var chunks = _.chunk(output[item], 10000)
 							processingOutput.push(PromiseBB.map(chunks, function(chunk) {
 								return new Promise((resolve, reject) => {
 									self.client.bulk({
@@ -558,7 +558,7 @@ var elastictractor = function () {
 										}
 									})
 								})
-							}, {concurrency: 1}));
+							}, {concurrency: 5}));
 						}
 					} else if (item === "firehose" || item === "kinesis") {
 
@@ -808,7 +808,7 @@ elastictractor.prototype.processS3 = function(s3Event) {
 	      }).on('end', function() {
 					if (logs.length > 0) {
 						var events = [];
-						var chunks = _.chunk(logs, 5000)
+						var chunks = _.chunk(logs, 200000)
 						chunks.map(chunk => {
 							events.push(extend({logs: chunk}, s3Event));
 						});

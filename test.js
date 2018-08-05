@@ -42,14 +42,14 @@ index.handler({
                 "s3SchemaVersion": "1.0",
                 "configurationId": "a00279a9-a354-45ed-b123-9687669b87af",
                 "bucket": {
-                    "name": "cfstack-prd-ec2-sftp-s3fs-repositorys3bucket-1bzr6g7hpi126",
+                    "name": "smiles-elb-logs",
                     "ownerIdentity": {
                         "principalId": "A1VM0T8EO8QG7F"
                     },
-                    "arn": "arn:aws:s3:::cfstack-prd-ec2-sftp-s3fs-repositorys3bucket-1bzr6g7hpi126"
+                    "arn": "arn:aws:s3:::smiles-elb-logs"
                 },
                 "object": {
-                    "key": "www_a_345848.esw3ccstm_S.201808041000-1100-0.gz",
+                    "key": "nginx-portal/prd-green/nginx/AWSLogs/774515094505/elasticloadbalancing/us-east-1/2018/08/05/774515094505_elasticloadbalancing_us-east-1_app.cfsta-EcsLo-MJPIV3NUDL8W.7746c0c8b7b3a806_20180805T0000Z_18.211.159.202_4xw23twx.log.gz",
                     "size": 48369052
                 }
             }
