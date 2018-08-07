@@ -544,7 +544,7 @@ var elastictractor = function () {
 						//  Send documents to elasticsearch, if has one
 						if (output[item].length > 0) {
 							// Split into chunk of 500 items
-							var chunks = _.chunk(output[item], 10000)
+							var chunks = _.chunk(output[item], 1000)
 							processingOutput.push(PromiseBB.map(chunks, function(chunk) {
 								return new Promise((resolve, reject) => {
 									self.client.bulk({
@@ -796,8 +796,11 @@ elastictractor.prototype.processS3 = function(s3Event) {
 			var s3Stream = s3.getObject({Bucket: s3Event.s3.bucket.name, Key: decodeURIComponent(s3Event.s3.object.key.replace(/\+/g, ' '))}).createReadStream();
 			var lineStream = new LineStream();
 			var logs = []
+			// Add decompressor if necessary
+			if (s3Event.s3.object.key.endsWith(".gz")) {
+				s3Stream = s3Stream.pipe(zlib.createGunzip());
+			}
 	    s3Stream
-			  .pipe(zlib.createGunzip())
 	      .pipe(lineStream)
 				// .pipe(recordStream)
 	      .on('data', function(data) {
