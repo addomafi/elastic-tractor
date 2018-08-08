@@ -10,13 +10,13 @@ var Elastictractor = require(path.join(__dirname, '..', 'elastictractor.js'))
 var tractor = new Elastictractor()
 
 if (argv["id"]) {
-  tractor.process(argv["index"], argv["id"]).then(results => {
+  tractor.reindex(argv["index"], argv["id"]).then(results => {
     console.log(JSON.stringify(results));
   }).catch(err => {
     console.log(err)
   });
 } else {
-  tractor.processBacklog(argv["index"]).then(results => {
+  tractor.processESBacklog(argv["index"]).then(results => {
     console.log(JSON.stringify(results));
   }).catch(err => {
     console.log(err)
