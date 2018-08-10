@@ -19,7 +19,7 @@ exports.handler = function(event, context, callback) {
         switch(evtSrc) {
           case "aws:s3":
             if (evtRecord.s3.object.size > 0) {
-              tractor.processS3(evtRecord).then(results => {
+              tractor.processS3(evtRecord, evtSrc).then(results => {
                 callback(null, "Success");
               }).catch(err => {
                 delete evtRecord.logs;
@@ -31,16 +31,8 @@ exports.handler = function(event, context, callback) {
               callback(null, "Success");
             }
             break;
-          case "aws:sns":
-            tractor.processSNS(evtRecord).then(results => {
-              callback(null, "Success");
-            }).catch(err => {
-              console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
-              callback(err, "Error");
-            });
-            break;
           case "aws:kinesis":
-            tractor.processKinesis(evtRecord).then(results => {
+            tractor.processKinesis(evtRecord, evtSrc).then(results => {
               callback(null, "Success");
             }).catch(err => {
               console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
@@ -57,7 +49,7 @@ exports.handler = function(event, context, callback) {
       var buffer = Buffer.from(event.awslogs.data, 'base64')
       zlib.unzip(buffer, (err, buffer) => {
         if (!err) {
-          tractor.processAwsLog(JSON.parse(buffer.toString())).then(results => {
+          tractor.processAwsLog(JSON.parse(buffer.toString()), "aws:awsLogs").then(results => {
             callback(null, "Success");
           }).catch(err => {
             console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
