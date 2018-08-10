@@ -474,28 +474,23 @@ var elastictractor = function () {
 		});
 	};
 
-	self._hasConfig = function(event, type) {
+	self._hasConfig = function(config, event, type) {
 		var self = this
 		return new Promise((resolve, reject) => {
-			// Load configuration
-			self._init().then(config => {
-				// Keep only first pattern related the respective event _type
-				var patterns = _.filter(config.patterns, x => {
-					// Normalize data
-					if (x.config.field.name.indexOf("$") < 0) {
-						x.config.field.name = `\$\{v.${x.config.field.name}\}`;
-					}
-					return x.config && _.indexOf(x.config.source, type) > -1 && x.config.field && self.matches(x.config.field.regex, template(x.config.field.name, event))
-				})
-				if (patterns.length > 0) {
-					config.patterns = patterns;
-					resolve(config);
-				} else {
-					reject("It's not configured.");
+			// Keep only first pattern related the respective event _type
+			var patterns = _.filter(config.patterns, x => {
+				// Normalize data
+				if (x.config.field.name.indexOf("$") < 0) {
+					x.config.field.name = `\$\{v.${x.config.field.name}\}`;
 				}
-			}).catch(err => {
-				reject(err);
+				return x.config && _.indexOf(x.config.source, type) > -1 && x.config.field && self.matches(x.config.field.regex, template(x.config.field.name, event))
 			})
+			if (patterns.length > 0) {
+				config.patterns = patterns;
+				resolve(config);
+			} else {
+				reject("It's not configured.");
+			}
 		})
 	}
 
@@ -642,6 +637,11 @@ var elastictractor = function () {
 	};
 }
 
+elastictractor.prototype.init = function() {
+	var self = this
+	return self._init();
+}
+
 elastictractor.prototype.reindexESDocument = function (index, documentId) {
 	var self = this
 	return new Promise((resolve, reject) => {
@@ -680,10 +680,10 @@ elastictractor.prototype.reindexESDocument = function (index, documentId) {
  * @param  {[type]} awsLogEvent Event from CloudWatch logs
  * @return {[type]}             Promise
  */
-elastictractor.prototype.processAwsLog = function (awsLogEvent, type) {
+elastictractor.prototype.processAwsLog = function (config, awsLogEvent, type) {
 	var self = this
 	return new Promise((resolve, reject) => {
-		self._hasConfig(awsLogEvent, type).then(config => {
+		self._hasConfig(config, awsLogEvent, type).then(config => {
 			self._processEvent(awsLogEvent, config).then(response => {
 				resolve(response);
 			}).catch(err => {
@@ -695,10 +695,10 @@ elastictractor.prototype.processAwsLog = function (awsLogEvent, type) {
 	});
 }
 
-elastictractor.prototype.processS3 = function (s3Event, type) {
+elastictractor.prototype.processS3 = function (config, s3Event, type) {
 	var self = this
 	return new Promise((resolve, reject) => {
-		self._hasConfig(s3Event, type).then(config => {
+		self._hasConfig(config, s3Event, type).then(config => {
 			var s3Stream = s3.getObject({Bucket: s3Event.s3.bucket.name, Key: decodeURIComponent(s3Event.s3.object.key.replace(/\+/g, ' '))}).createReadStream();
 			var lineStream = new LineStream();
 			var logs = []
@@ -739,10 +739,10 @@ elastictractor.prototype.processS3 = function (s3Event, type) {
 	});
 };
 
-elastictractor.prototype.processKinesis = function (kinesisEvent, type) {
+elastictractor.prototype.processKinesis = function (config, kinesisEvent, type) {
 	var self = this
 	return new Promise((resolve, reject) => {
-		self._hasConfig(kinesisEvent, type).then(config => {
+		self._hasConfig(config, kinesisEvent, type).then(config => {
 			// Treat as a stream of Base64
 			var buffer = Buffer.from(kinesisEvent.kinesis.data, 'base64')
 			kinesisEvent.data = [{"data": [buffer.toString()]}];
