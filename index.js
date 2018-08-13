@@ -19,6 +19,7 @@ exports.handler = function(event, context, callback) {
           }
           switch(evtSrc) {
             case "aws:s3":
+              console.log("Processing and S3 event...");
               if (evtRecord.s3.object.size > 0) {
                 tractor.processS3(config, evtRecord, evtSrc).then(results => {
                   callback(null, "Success");
@@ -33,6 +34,7 @@ exports.handler = function(event, context, callback) {
               }
               break;
             case "aws:kinesis":
+              console.log("Processing and Kinesis event...");
               tractor.processKinesis(config, evtRecord, evtSrc).then(results => {
                 callback(null, "Success");
               }).catch(err => {
@@ -48,16 +50,20 @@ exports.handler = function(event, context, callback) {
       } else {
         // Treat as a stream of CloudWatch Logs
         var buffer = Buffer.from(event.awslogs.data, 'base64')
+        console.log("Processing and Cloudwatch Log event...");
         zlib.unzip(buffer, (err, buffer) => {
           if (!err) {
             tractor.processAwsLog(config, JSON.parse(buffer.toString()), "aws:awsLogs").then(results => {
+              context.callbackWaitsForEmptyEventLoop = false;
               callback(null, "Success");
             }).catch(err => {
               console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
+              context.callbackWaitsForEmptyEventLoop = false;
               callback(null, "Success");
             });
           } else {
             console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
+            context.callbackWaitsForEmptyEventLoop = false;
             callback(null, "Success");
           }
         });

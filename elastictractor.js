@@ -12,7 +12,7 @@ let moment = require('moment');
 var LineStream = require('byline').LineStream;
 var stream = require('stream');
 const zlib = require('zlib');
-var PromiseBB = require("bluebird");
+var Promise = require("bluebird");
 // var heapdump = require('heapdump');
 
 var elastictractor = function () {
@@ -221,66 +221,74 @@ var elastictractor = function () {
 					filtered = [newItem]
 					// Do some extra actions if need
 					if (filtered.length && pattern.config.actions) {
-						var onSuccess = pattern.config.actions.onSuccess;
-						// Add info if necessary
-						if (onSuccess) {
-							if (onSuccess.parseJson) {
-								onSuccess.parseJson.map(key => {
-									try {
-										extend(filtered[0], JSON.parse(filtered[0][key]))
-									} catch(e) {
-										// console.log(e)
-									}
+						// If any error occurs discard the data
+						try {
+							var onSuccess = pattern.config.actions.onSuccess;
+							// Add info if necessary
+							if (onSuccess) {
+								if (onSuccess.parseJson) {
+									onSuccess.parseJson.map(key => {
+										try {
+											extend(filtered[0], JSON.parse(filtered[0][key]))
+										} catch(e) {
+											// console.log(e)
+										}
 
-									delete filtered[0][key]
-								})
+										delete filtered[0][key]
+									})
+								}
+								if (onSuccess.add) {
+									Object.keys(onSuccess.add).map(key => {
+										filtered[0][key] = template(onSuccess.add[key], filtered[0])
+										if (key === "timestamp") {
+											data.timestamp = filtered[0][key]
+										}
+									})
+								}
+								if (onSuccess.delete) {
+									onSuccess.delete.map(key => {
+										delete filtered[0][key]
+									})
+								}
+								if (onSuccess.parseInt) {
+									onSuccess.parseInt.map(key => {
+										filtered[0][key] = parseInt(filtered[0][key])
+									})
+								}
+								if (onSuccess.extract) {
+									// Keep only related patterns
+									var relatedPatterns = _.filter(onSuccess.extract, x => x.pattern && self.matches(x.pattern.regex, template(x.pattern.value, filtered[0])));
+									// Get only the first pattern to be applied
+									var electedPattern = _.first(_.sortBy(relatedPatterns, ['pattern.order']));
+									// Get unrestricted patterns
+									var unrestrictedPatterns = _.filter(onSuccess.extract, x => !x.pattern);
+									// Join all paterns
+									_.concat(electedPattern, unrestrictedPatterns).map(item => {
+										if (item) {
+											Object.keys(item).map(key => {
+	 											if (key !== "pattern") {
+													item[key].map(regexItem => {
+														try {
+															var value = template(`\$\{v.${key}\}`, filtered[0]);
+															if (value !== "undefined") {
+																additionalExtractor.push({
+																	"data": value,
+																	"regex": regexItem
+																});
+															}
+														} catch (e) {}
+													})
+												}
+											})
+										}
+									})
+								}
 							}
-							if (onSuccess.add) {
-								Object.keys(onSuccess.add).map(key => {
-									filtered[0][key] = template(onSuccess.add[key], filtered[0])
-									if (key === "timestamp") {
-										data.timestamp = filtered[0][key]
-									}
-								})
-							}
-							if (onSuccess.delete) {
-								onSuccess.delete.map(key => {
-									delete filtered[0][key]
-								})
-							}
-							if (onSuccess.parseInt) {
-								onSuccess.parseInt.map(key => {
-									filtered[0][key] = parseInt(filtered[0][key])
-								})
-							}
-							if (onSuccess.extract) {
-								// Keep only related patterns
-								var relatedPatterns = _.filter(onSuccess.extract, x => x.pattern && self.matches(x.pattern.regex, template(x.pattern.value, filtered[0])));
-								// Get only the first pattern to be applied
-								var electedPattern = _.first(_.sortBy(relatedPatterns, ['pattern.order']));
-								// Get unrestricted patterns
-								var unrestrictedPatterns = _.filter(onSuccess.extract, x => !x.pattern);
-								// Join all paterns
-								_.concat(electedPattern, unrestrictedPatterns).map(item => {
-									if (item) {
-										Object.keys(item).map(key => {
- 											if (key !== "pattern") {
-												item[key].map(regexItem => {
-													try {
-														var value = template(`\$\{v.${key}\}`, filtered[0]);
-														if (value !== "undefined") {
-															additionalExtractor.push({
-																"data": value,
-																"regex": regexItem
-															});
-														}
-													} catch (e) {}
-												})
-											}
-										})
-									}
-								})
-							}
+						} catch (err) {
+							console.log(`An error occurred during onSuccess step: ${err.message}`);
+							console.log(err.stack)
+							// Discard the Data
+							filtered = []
 						}
 					}
 				}
@@ -301,7 +309,8 @@ var elastictractor = function () {
 								index.id = filtered[0][item.id];
 								delete filtered[0][item.id];
 							} else {
-								if (filtered.length && filtered[0].hasError) {
+								// If has errorMessage attribute add prefix -error to index
+								if (filtered.length && filtered[0].errorMessage) {
 									index.index = `${item.prefix}error-${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
 								} else {
 									index.index = `${item.prefix}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
@@ -318,12 +327,12 @@ var elastictractor = function () {
 				}
 				// Apply additional extractor if has one
 				if (additionalExtractor.length) {
-					regexInProcessing = [];
+					var addRegexInProcessing = [];
 					additionalExtractor.map(item => {
-						regexInProcessing.push(self._parseRegex(item.regex, item.data));
+						addRegexInProcessing.push(self._parseRegex(item.regex, item.data));
 					})
 					// Wait for all promisses be finished
-					Promise.all(regexInProcessing).then(results => {
+					Promise.all(addRegexInProcessing).then(results => {
 						// Got only valid results
 						var filtered = _.filter(results, x => x);
 
@@ -504,7 +513,7 @@ var elastictractor = function () {
 					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
 
 					var logs = event[pattern.config.field.data];
-					PromiseBB.map(logs, function(data) {
+					Promise.map(logs, function(data) {
 						data.source = template(pattern.config.field.name, event);
 						return self._parse(data, { config: pattern.config, regexp: pattern.regex });
 					}, {concurrency: 100000}).then(results => {
@@ -575,7 +584,7 @@ var elastictractor = function () {
 						if (output[item].length > 0) {
 							// Split into chunk of 500 items
 							var chunks = _.chunk(output[item], 1000)
-							processingOutput.push(PromiseBB.map(chunks, function(chunk) {
+							processingOutput.push(Promise.map(chunks, function(chunk) {
 								return new Promise((resolve, reject) => {
 									self.client.bulk({
 										body: chunk
@@ -722,7 +731,7 @@ elastictractor.prototype.processS3 = function (config, s3Event, type) {
 							events.push(extend({logs: chunk}, s3Event));
 						});
 						logs = [];
-						PromiseBB.map(events, function(event) {
+						Promise.map(events, function(event) {
 							return self._processEvent(event, config)
 						}, {concurrency: 1}).then(response => {
 							resolve(response);
