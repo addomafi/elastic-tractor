@@ -49,24 +49,40 @@ exports.handler = function(event, context, callback) {
         })
       } else {
         // Treat as a stream of CloudWatch Logs
-        var buffer = Buffer.from(event.awslogs.data, 'base64')
-        console.log("Processing and Cloudwatch Log event...");
-        zlib.unzip(buffer, (err, buffer) => {
-          if (!err) {
-            tractor.processAwsLog(config, JSON.parse(buffer.toString()), "aws:awsLogs").then(results => {
-              context.callbackWaitsForEmptyEventLoop = false;
+        if (!event.awslogs) {
+          switch(event.source) {
+            case "aws.ecs":
+              tractor.processEcs(config, event, event.source).then(results => {
+                callback(null, "Success");
+              }).catch(err => {
+                console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(event)}`)
+                callback(err, "Error");
+              });
+              break;
+            default:
+              console.log(`Event source "${event.source}" is not supported. Event: ${JSON.stringify(event)}`)
               callback(null, "Success");
-            }).catch(err => {
+          }
+        } else {
+          var buffer = Buffer.from(event.awslogs.data, 'base64')
+          console.log("Processing and Cloudwatch Log event...");
+          zlib.unzip(buffer, (err, buffer) => {
+            if (!err) {
+              tractor.processAwsLog(config, JSON.parse(buffer.toString()), "aws:awsLogs").then(results => {
+                context.callbackWaitsForEmptyEventLoop = false;
+                callback(null, "Success");
+              }).catch(err => {
+                console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
+                context.callbackWaitsForEmptyEventLoop = false;
+                callback(null, "Success");
+              });
+            } else {
               console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
               context.callbackWaitsForEmptyEventLoop = false;
               callback(null, "Success");
-            });
-          } else {
-            console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
-            context.callbackWaitsForEmptyEventLoop = false;
-            callback(null, "Success");
-          }
-        });
+            }
+          });
+        }
       }
     });
 };

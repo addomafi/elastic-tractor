@@ -511,8 +511,8 @@ var elastictractor = function () {
 				patternsInProcessing.push(new Promise((resolve, reject) => {
 					// Keep only elegible index
 					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
-
-					var logs = event[pattern.config.field.data];
+					// Keep object as array
+					var logs = _.concat(event[pattern.config.field.data], []);
 					Promise.map(logs, function(data) {
 						data.source = template(pattern.config.field.name, event);
 						return self._parse(data, { config: pattern.config, regexp: pattern.regex });
@@ -756,6 +756,21 @@ elastictractor.prototype.processKinesis = function (config, kinesisEvent, type) 
 			var buffer = Buffer.from(kinesisEvent.kinesis.data, 'base64')
 			kinesisEvent.data = [{"data": [buffer.toString()]}];
 			self._processEvent(kinesisEvent, config).then(response => {
+				resolve(response);
+			}).catch(err => {
+				reject(err);
+			})
+		}).catch(err => {
+			reject(err)
+		});
+	});
+}
+
+elastictractor.prototype.processEcs = function (config, ecsEvent, type) {
+	var self = this
+	return new Promise((resolve, reject) => {
+		self._hasConfig(config, ecsEvent, type).then(config => {
+			self._processEvent(extend(ecsEvent, {data: {message: JSON.stringify(ecsEvent)}}), config).then(response => {
 				resolve(response);
 			}).catch(err => {
 				reject(err);
