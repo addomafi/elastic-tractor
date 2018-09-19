@@ -31,6 +31,8 @@ var elastictractor = function () {
 		log: 'warning'
 	});
 
+	self.clientPool = {};
+
 	self.matches = function (regex, value) {
 		var onReg = new OnigRegExp(regex);
 		var ret = onReg.testSync(value);
@@ -294,8 +296,7 @@ var elastictractor = function () {
 				}
 
 				var parsedObj = {results: filtered};
-				// Check output type
-				if (pattern.config.output) {
+				var generateOutput = parsedObj => {
 					parsedObj.output = [];
 					pattern.config.output.forEach(item => {
 						if (item.type === "aws:firehose" || item.type === "aws:kinesis") {
@@ -325,6 +326,7 @@ var elastictractor = function () {
 						}
 					})
 				}
+
 				// Apply additional extractor if has one
 				if (additionalExtractor.length) {
 					var addRegexInProcessing = [];
@@ -339,11 +341,20 @@ var elastictractor = function () {
 						filtered.forEach(item => {
 							extend(parsedObj.results[0], item)
 						});
+
+						// Check output type
+						if (pattern.config.output) {
+							generateOutput(parsedObj);
+						}
 						resolve(parsedObj)
 					}).catch(err => {
 						reject(err)
 					})
 				} else {
+					// Check output type
+					if (pattern.config.output) {
+						generateOutput(parsedObj);
+					}
 					resolve(parsedObj)
 				}
 			}).catch(err => {
@@ -559,7 +570,7 @@ var elastictractor = function () {
 							output.firehose[out.arn]["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
 						} else if (out.type === "elasticsearch") {
 							// if array wasn't initialized
-							if (!output.elk) output.elk = [];
+							if (!output.elk) output.elk = {};
 							// Contructs the body object to foward to elasticsearch
 							var index = { _index: out.index, _type: "metric" };
 							if (out.mapping) index["_type"] = out.mapping;
@@ -571,8 +582,16 @@ var elastictractor = function () {
 							} else {
 								index = { index: index }
 							}
-							output.elk.push(index);
-							output.elk.push(results);
+							var hashElkOutput = md5(out.url)
+							if (!self.clientPool[hashElkOutput]) {
+								self.clientPool[hashElkOutput] = new es.Client({
+									host: out.url,
+									log: 'warning'
+								});
+								output.elk[hashElkOutput] = [];
+							}
+							output.elk[hashElkOutput].push(index);
+							output.elk[hashElkOutput].push(results);
 						}
 					})
 				});
@@ -580,25 +599,37 @@ var elastictractor = function () {
 				var processingOutput = []
 				Object.keys(output).forEach(item => {
 					if (item === "elk") {
-						//  Send documents to elasticsearch, if has one
-						if (output[item].length > 0) {
-							// Split into chunk of 500 items
-							var chunks = _.chunk(output[item], 1000)
-							processingOutput.push(Promise.map(chunks, function(chunk) {
-								return new Promise((resolve, reject) => {
-									self.client.bulk({
-										body: chunk
-									}, function (error, response) {
-										if (error) {
-											console.log(error);
-											reject(error);
-										} else {
-											resolve(response);
-										}
+						Object.keys(output.elk).forEach(elkHash => {
+							//  Send documents to elasticsearch, if has one
+							if (output.elk[elkHash].length > 0) {
+								console.log(`Writting ${output.elk[elkHash].length/2} records to ELK.`);
+								// heapdump.writeSnapshot(function(err, filename) {
+								// 	console.log('dump written to', filename);
+								// });
+								// Split into chunk of 500 items
+								var chunks = _.chunk(output.elk[elkHash], 1000)
+								processingOutput.push(Promise.map(chunks, function(chunk) {
+									return new Promise((resolve, reject) => {
+										self.clientPool[elkHash].bulk({
+											body: chunk
+										}, function (error, response) {
+											if (error) {
+												console.log(error);
+												reject(error);
+											} else if (response.errors) {
+												var anError = _.head(_.filter(response.items, item => item.index.error));
+												if (anError) {
+													console.log(JSON.stringify(anError));
+													reject(anError);
+												}
+											} else {
+												resolve(response);
+											}
+										})
 									})
-								})
-							}, {concurrency: 5}));
-						}
+								}, {concurrency: 5}));
+							}
+						})
 					} else if (item === "firehose" || item === "kinesis") {
 
 						Object.keys(output[item]).forEach(stream => {
@@ -726,7 +757,7 @@ elastictractor.prototype.processS3 = function (config, s3Event, type) {
 	      }).on('end', function() {
 					if (logs.length > 0) {
 						var events = [];
-						var chunks = _.chunk(logs,100, 200000)
+						var chunks = _.chunk(logs,10000)
 						chunks.map(chunk => {
 							events.push(extend({logs: chunk}, s3Event));
 						});

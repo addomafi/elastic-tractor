@@ -19,7 +19,7 @@ exports.handler = function(event, context, callback) {
           }
           switch(evtSrc) {
             case "aws:s3":
-              console.log("Processing and S3 event...");
+              console.log(`Processing an S3 event... ${evtRecord.s3.object.key}`);
               if (evtRecord.s3.object.size > 0) {
                 tractor.processS3(config, evtRecord, evtSrc).then(results => {
                   callback(null, "Success");
@@ -34,7 +34,7 @@ exports.handler = function(event, context, callback) {
               }
               break;
             case "aws:kinesis":
-              console.log("Processing and Kinesis event...");
+              console.log("Processing an Kinesis event...");
               tractor.processKinesis(config, evtRecord, evtSrc).then(results => {
                 callback(null, "Success");
               }).catch(err => {
@@ -65,7 +65,7 @@ exports.handler = function(event, context, callback) {
           }
         } else {
           var buffer = Buffer.from(event.awslogs.data, 'base64')
-          console.log("Processing and Cloudwatch Log event...");
+          console.log("Processing an Cloudwatch Log event...");
           zlib.unzip(buffer, (err, buffer) => {
             if (!err) {
               tractor.processAwsLog(config, JSON.parse(buffer.toString()), "aws:awsLogs").then(results => {
