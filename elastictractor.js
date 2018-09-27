@@ -44,53 +44,60 @@ var elastictractor = function () {
 		return new Promise((resolve, reject) => {
 			if (!self.config || process.hrtime(self.config.loadTime)[0] > 60) {
 				self.client.search({
-    			index: ".tractor",
+    			index: ".tractor-grok-patterns",
     			body: {
             "size": 1000
           }
-    		}).then(function(body) {
-          var details = [];
-					if (body && body.hits && body.hits.hits.length > 0) {
-						var extractPatterns = _.filter(body.hits.hits, {"_type": "extractor_patterns_v2"})
+    		}).then(function(bodyGrok) {
+					self.client.search({
+	    			index: ".tractor-patterns",
+	    			body: {
+	            "size": 1000
+	          }
+	    		}).then(function(body) {
+	          var details = [];
+						if (body && body.hits && body.hits.hits.length > 0) {
+							var patterns = [];
+							// Create an array of patterns to extract info
+							_.each(body.hits.hits, item => {
+								try {
+									patterns.push(extend({
+									}, JSON.parse(item["_source"].patternJSON)))
+								} catch (err) {
+									console.log(`Error to parse a JSON pattern "${item["_source"].patternJSON}"`)
+								}
+							})
 
-						var patterns = [];
-						// Create an array of patterns to extract info
-						_.each(extractPatterns, item => {
-							try {
-								patterns.push(extend({
-								}, JSON.parse(item["_source"].patternJSON)))
-							} catch (err) {
-								console.log(`Error to parse a JSON pattern "${item["_source"].patternJSON}"`)
-							}
-						})
+							self.config = {
+								loadTime: process.hrtime(),
+								patterns: patterns
+							};
 
-						self.config = {
-							loadTime: process.hrtime(),
-							patterns: patterns
-						};
-
-						grok.loadDefault(function (err, patterns) {
-							if (err) reject(err);
-							else {
-								self.config.grokPatterns = patterns
-								// Load custom Grok patterns
-								var customGrokPatterns = _.sortBy(_.filter(body.hits.hits, {"_type": "patterns"}), [function(o) { return o["_source"].priority; }])
-								_.each(customGrokPatterns, item => {
-									if (!self.config.grokPatterns.getPattern(item["_source"].id)) {
-										self.config.grokPatterns.createPattern(item["_source"].pattern, item["_source"].id)
-									}
-								})
-								console.log("Loaded");
-								resolve(self.config);
-							}
-						});
-					} else {
-						reject("Extractor patterns wasn't defined, please define it firstly.");
-					}
-        }, function (error) {
+							grok.loadDefault(function (err, patterns) {
+								if (err) reject(err);
+								else {
+									self.config.grokPatterns = patterns
+									// Load custom Grok patterns
+									_.each(bodyGrok.hits.hits, item => {
+										if (!self.config.grokPatterns.getPattern(item["_id"])) {
+											self.config.grokPatterns.createPattern(item["_source"].pattern, item["_id"])
+										}
+									})
+									console.log("Loaded");
+									resolve(self.config);
+								}
+							});
+						} else {
+							reject("Extractor patterns wasn't defined, please define it firstly.");
+						}
+	        }, function (error) {
+						console.log(error);
+	          reject(error.message);
+	        })
+				}, function (error) {
 					console.log(error);
           reject(error.message);
-        });
+        })
 			} else {
 				resolve(self.config);
 			}
@@ -588,8 +595,9 @@ var elastictractor = function () {
 									host: out.url,
 									log: 'warning'
 								});
-								output.elk[hashElkOutput] = [];
 							}
+							// Recreate array if it not exists
+							if (!output.elk[hashElkOutput]) output.elk[hashElkOutput] = [];
 							output.elk[hashElkOutput].push(index);
 							output.elk[hashElkOutput].push(results);
 						}
