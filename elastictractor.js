@@ -23,7 +23,13 @@ var elastictractor = function () {
 		var keys = Object.keys(value),
 				fn = new Function(...keys,
 					'return `' + tpl.replace(/`/g, '\\`') + '`');
-		return fn(...keys.map(x => value[x]));
+		try {
+			return fn(...keys.map(x => value[x]));
+		} catch (err) {
+			console.log(`An error occurred during template function: ${err.message}`);
+			console.log(err.stack)
+			return ""
+		}
 	};
 
 	self.client = new es.Client({
