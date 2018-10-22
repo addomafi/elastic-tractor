@@ -26,8 +26,6 @@ var elastictractor = function () {
 		try {
 			return fn(...keys.map(x => value[x]));
 		} catch (err) {
-			console.log(`An error occurred during template function: ${err.message}`);
-			console.log(err.stack)
 			return ""
 		}
 	};
@@ -797,9 +795,6 @@ elastictractor.prototype.processKinesis = function (config, kinesisEvent, type) 
 	var self = this
 	return new Promise((resolve, reject) => {
 		self._hasConfig(config, kinesisEvent, type).then(config => {
-			// Treat as a stream of Base64
-			var buffer = Buffer.from(kinesisEvent.kinesis.data, 'base64')
-			kinesisEvent.data = [{"data": [buffer.toString()]}];
 			self._processEvent(kinesisEvent, config).then(response => {
 				resolve(response);
 			}).catch(err => {

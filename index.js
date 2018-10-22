@@ -1,17 +1,26 @@
 'use strict';
 
 let path = require('path')
+let extend = require('extend')
 const zlib = require('zlib')
 const _ = require('lodash')
+var aws = require('aws-sdk')
+var lambda = new aws.Lambda({
+  region: 'us-east-1'
+})
+var Promise = require("bluebird")
 let ElasticTractor = require(path.join(__dirname, '.', 'elastictractor.js'))
 
 console.log('Loading function');
+
+aws.config.setPromisesDependency(require('bluebird'));
 
 exports.handler = function(event, context, callback) {
     let tractor = new ElasticTractor();
     tractor.init().then(config => {
       // If it has records
       if (event.Records) {
+        var kinesisEvents = [];
         _.forEach(event.Records, function(evtRecord) {
           var evtSrc = evtRecord.eventSource;
           if (evtRecord.EventSource) {
@@ -35,18 +44,42 @@ exports.handler = function(event, context, callback) {
               break;
             case "aws:kinesis":
               console.log("Processing an Kinesis event...");
-              tractor.processKinesis(config, evtRecord, evtSrc).then(results => {
-                callback(null, "Success");
-              }).catch(err => {
-                console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
-                callback(err, "Error");
-              });
+              evtRecord.source = evtSrc;
+              kinesisEvents.add(evtRecord);
               break;
             default:
               console.log(`Event source "${evtRecord.eventSource}" is not supported. Event: ${JSON.stringify(evtRecord)}`)
               callback(null, "Success");
           }
         })
+
+        // Check if it is an event from Kinesis
+        if (kinesisEvents.length > 0) {
+          // Get chunk of 50
+          var chunks = []
+          _.chunk(kinesisEvents, 50).forEach(chunk => {
+            var joined = JSON.parse(JSON.stringify(chunk[0]))
+            delete joined.kinesis.data
+            joined.data = []
+            chunk.forEach(unique => {
+              var buffer = Buffer.from(unique.kinesis.data, 'base64')
+        			joined.data.add({ "data": buffer.toString() });
+            })
+            chunks.add(joined);
+          })
+          Promise.map(chunks, function(kinesisEvent) {
+            return lambda.invoke({
+                FunctionName: 'arn:aws:lambda:us-east-1:774515094505:function:es-tractor-v2',
+                Payload: new Buffer(JSON.stringify(kinesisEvent))
+              }).promise();
+          }, {concurrency: 500}).then(results => {
+            callback(null, "Success");
+          }).catch(err => {
+            console.log(`Occurred an error "${JSON.stringify(err)}"`)
+            // Discard errors
+            callback(null, "Error");
+          });
+        }
       } else {
         // Treat as a stream of CloudWatch Logs
         if (!event.awslogs) {
@@ -59,6 +92,15 @@ exports.handler = function(event, context, callback) {
                 callback(err, "Error");
               });
               break;
+              case "aws:kinesis":
+                console.log("Processing an Kinesis event...");
+                tractor.processKinesis(config, event, event.source).then(results => {
+                  callback(null, "Success");
+                }).catch(err => {
+                  console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(event)}`)
+                  callback(err, "Error");
+                });
+                break;
             default:
               console.log(`Event source "${event.source}" is not supported. Event: ${JSON.stringify(event)}`)
               callback(null, "Success");
