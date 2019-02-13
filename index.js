@@ -69,7 +69,7 @@ exports.handler = function(event, context, callback) {
           })
           Promise.map(chunks, function(kinesisEvent) {
             return lambda.invoke({
-                FunctionName: 'arn:aws:lambda:us-east-1:774515094505:function:es-tractor-v2',
+                FunctionName: context.invokedFunctionArn,
                 Payload: new Buffer(JSON.stringify(kinesisEvent))
               }).promise();
           }, {concurrency: 500}).then(results => {
