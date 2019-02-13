@@ -12,7 +12,7 @@ let moment = require('moment');
 var LineStream = require('byline').LineStream;
 var stream = require('stream');
 const zlib = require('zlib');
-var PromiseBB = require("bluebird");
+var Promise = require("bluebird");
 // var heapdump = require('heapdump');
 
 var elastictractor = function () {
@@ -23,13 +23,19 @@ var elastictractor = function () {
 		var keys = Object.keys(value),
 				fn = new Function(...keys,
 					'return `' + tpl.replace(/`/g, '\\`') + '`');
-		return fn(...keys.map(x => value[x]));
+		try {
+			return fn(...keys.map(x => value[x]));
+		} catch (err) {
+			return ""
+		}
 	};
 
 	self.client = new es.Client({
 		host: process.env.ELK_HOST,
 		log: 'warning'
 	});
+
+	self.clientPool = {};
 
 	self.matches = function (regex, value) {
 		var onReg = new OnigRegExp(regex);
@@ -42,53 +48,60 @@ var elastictractor = function () {
 		return new Promise((resolve, reject) => {
 			if (!self.config || process.hrtime(self.config.loadTime)[0] > 60) {
 				self.client.search({
-    			index: ".tractor",
+    			index: ".tractor-grok-patterns",
     			body: {
             "size": 1000
           }
-    		}).then(function(body) {
-          var details = [];
-					if (body && body.hits && body.hits.hits.length > 0) {
-						var extractPatterns = _.filter(body.hits.hits, {"_type": "extractor_patterns_v2"})
+    		}).then(function(bodyGrok) {
+					self.client.search({
+	    			index: ".tractor-patterns",
+	    			body: {
+	            "size": 1000
+	          }
+	    		}).then(function(body) {
+	          var details = [];
+						if (body && body.hits && body.hits.hits.length > 0) {
+							var patterns = [];
+							// Create an array of patterns to extract info
+							_.each(body.hits.hits, item => {
+								try {
+									patterns.push(extend({
+									}, JSON.parse(item["_source"].patternJSON)))
+								} catch (err) {
+									console.log(`Error to parse a JSON pattern "${item["_source"].patternJSON}"`)
+								}
+							})
 
-						var patterns = [];
-						// Create an array of patterns to extract info
-						_.each(extractPatterns, item => {
-							try {
-								patterns.push(extend({
-								}, JSON.parse(item["_source"].patternJSON)))
-							} catch (err) {
-								console.log(`Error to parse a JSON pattern "${item["_source"].patternJSON}"`)
-							}
-						})
+							self.config = {
+								loadTime: process.hrtime(),
+								patterns: patterns
+							};
 
-						self.config = {
-							loadTime: process.hrtime(),
-							patterns: patterns
-						};
-
-						grok.loadDefault(function (err, patterns) {
-							if (err) reject(err);
-							else {
-								self.config.grokPatterns = patterns
-								// Load custom Grok patterns
-								var customGrokPatterns = _.sortBy(_.filter(body.hits.hits, {"_type": "patterns"}), [function(o) { return o["_source"].priority; }])
-								_.each(customGrokPatterns, item => {
-									if (!self.config.grokPatterns.getPattern(item["_source"].id)) {
-										self.config.grokPatterns.createPattern(item["_source"].pattern, item["_source"].id)
-									}
-								})
-								console.log("Loaded");
-								resolve(self.config);
-							}
-						});
-					} else {
-						reject("Extractor patterns wasn't defined, please define it firstly.");
-					}
-        }, function (error) {
+							grok.loadDefault(function (err, patterns) {
+								if (err) reject(err);
+								else {
+									self.config.grokPatterns = patterns
+									// Load custom Grok patterns
+									_.each(bodyGrok.hits.hits, item => {
+										if (!self.config.grokPatterns.getPattern(item["_id"])) {
+											self.config.grokPatterns.createPattern(item["_source"].pattern, item["_id"])
+										}
+									})
+									console.log("Loaded");
+									resolve(self.config);
+								}
+							});
+						} else {
+							reject("Extractor patterns wasn't defined, please define it firstly.");
+						}
+	        }, function (error) {
+						console.log(error);
+	          reject(error.message);
+	        })
+				}, function (error) {
 					console.log(error);
           reject(error.message);
-        });
+        })
 			} else {
 				resolve(self.config);
 			}
@@ -219,102 +232,140 @@ var elastictractor = function () {
 					});
 
 					filtered = [newItem]
-
 					// Do some extra actions if need
 					if (filtered.length && pattern.config.actions) {
-						var onSuccess = pattern.config.actions.onSuccess;
-						// Add info if necessary
-						if (onSuccess) {
-							if (onSuccess.parseJson) {
-								onSuccess.parseJson.map(key => {
-									try {
-										extend(filtered[0], JSON.parse(filtered[0][key]))
-									} catch(e) {
-										// console.log(e)
-									}
+						// If any error occurs discard the data
+						try {
+							var onSuccess = pattern.config.actions.onSuccess;
+							// Add info if necessary
+							if (onSuccess) {
+								if (onSuccess.parseJson) {
+									onSuccess.parseJson.map(key => {
+										try {
+											extend(filtered[0], JSON.parse(filtered[0][key]))
+										} catch(e) {
+											// console.log(e)
+										}
 
-									delete filtered[0][key]
-								})
-							}
-							if (onSuccess.add) {
-								Object.keys(onSuccess.add).map(key => {
-									filtered[0][key] = template(onSuccess.add[key], filtered[0])
-									if (key === "timestamp") {
-										data.timestamp = filtered[0][key]
-									}
-								})
-							}
-							if (onSuccess.delete) {
-								onSuccess.delete.map(key => {
-									delete filtered[0][key]
-								})
-							}
-							if (onSuccess.parseInt) {
-								onSuccess.parseInt.map(key => {
-									filtered[0][key] = parseInt(filtered[0][key])
-								})
-							}
-							if (onSuccess.extract) {
-								onSuccess.extract.map(item => {
-									Object.keys(item).map(key => {
-										item[key].map(regexItem => {
-											try {
-												var value = template(`\$\{v.${key}\}`, filtered[0]);
-												if (value !== "undefined") {
-													additionalExtractor.push({
-														"data": value,
-														"regex": regexItem
-													});
-												}
-											} catch (e) {}
-										})
+										delete filtered[0][key]
 									})
-								})
+								}
+								if (onSuccess.add) {
+									Object.keys(onSuccess.add).map(key => {
+										filtered[0][key] = template(onSuccess.add[key], filtered[0])
+										if (key === "timestamp") {
+											data.timestamp = filtered[0][key]
+										}
+									})
+								}
+								if (onSuccess.delete) {
+									onSuccess.delete.map(key => {
+										delete filtered[0][key]
+									})
+								}
+								if (onSuccess.parseInt) {
+									onSuccess.parseInt.map(key => {
+										filtered[0][key] = parseInt(filtered[0][key])
+									})
+								}
+								if (onSuccess.extract) {
+									// Keep only related patterns
+									var relatedPatterns = _.filter(onSuccess.extract, x => x.pattern && self.matches(x.pattern.regex, template(x.pattern.value, filtered[0])));
+									// Get only the first pattern to be applied
+									var electedPattern = _.first(_.sortBy(relatedPatterns, ['pattern.order']));
+									// Get unrestricted patterns
+									var unrestrictedPatterns = _.filter(onSuccess.extract, x => !x.pattern);
+									// Join all paterns
+									_.concat(electedPattern, unrestrictedPatterns).map(item => {
+										if (item) {
+											Object.keys(item).map(key => {
+	 											if (key !== "pattern") {
+													item[key].map(regexItem => {
+														try {
+															var value = template(`\$\{v.${key}\}`, filtered[0]);
+															if (value !== "undefined") {
+																additionalExtractor.push({
+																	"data": value,
+																	"regex": regexItem
+																});
+															}
+														} catch (e) {}
+													})
+												}
+											})
+										}
+									})
+								}
 							}
+						} catch (err) {
+							console.log(`An error occurred during onSuccess step: ${err.message}`);
+							console.log(err.stack)
+							// Discard the Data
+							filtered = []
 						}
 					}
 				}
 
 				var parsedObj = {results: filtered};
-
-				// Check output type
-				if (pattern.config.output) {
+				var generateOutput = parsedObj => {
 					parsedObj.output = [];
 					pattern.config.output.forEach(item => {
 						if (item.type === "aws:firehose" || item.type === "aws:kinesis") {
 							parsedObj.output.push(item)
 						} else if (item.type === "elasticsearch") {
 							// Define index name
-							var index;
-							if (filtered.length && filtered[0].hasError) {
-								index = `${item.prefix}error-${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+							var index = {index: "", type: item.type, url: item.url};
+							if (item.id) {
+								index.index = filtered[0][item.index];
+								delete filtered[0][item.index];
+								index.id = filtered[0][item.id];
+								delete filtered[0][item.id];
 							} else {
-								index = `${item.prefix}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+								// If has errorMessage attribute add prefix -error to index
+								if (filtered.length && filtered[0].errorMessage) {
+									index.index = `${item.prefix}error-${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+								} else {
+									index.index = `${item.prefix}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
+								}
 							}
-							parsedObj.output.push({index: index, type: item.type, id: data["_id"], url: item.url})
+							// Define document type if necessary
+							if (item.mapping) {
+								index.mapping = filtered[0][item.mapping];
+								delete filtered[0][item.mapping];
+							}
+							parsedObj.output.push(index);
 						}
 					})
 				}
 
 				// Apply additional extractor if has one
 				if (additionalExtractor.length) {
-					regexInProcessing = [];
+					var addRegexInProcessing = [];
 					additionalExtractor.map(item => {
-						regexInProcessing.push(self._parseRegex(item.regex, item.data));
+						addRegexInProcessing.push(self._parseRegex(item.regex, item.data));
 					})
 					// Wait for all promisses be finished
-					Promise.all(regexInProcessing).then(results => {
+					Promise.all(addRegexInProcessing).then(results => {
 						// Got only valid results
 						var filtered = _.filter(results, x => x);
 
 						filtered.forEach(item => {
 							extend(parsedObj.results[0], item)
 						});
+
+						// Check output type
+						if (pattern.config.output) {
+							generateOutput(parsedObj);
+						}
 						resolve(parsedObj)
 					}).catch(err => {
 						reject(err)
 					})
 				} else {
+					// Check output type
+					if (pattern.config.output) {
+						generateOutput(parsedObj);
+					}
 					resolve(parsedObj)
 				}
 			}).catch(err => {
@@ -454,22 +505,23 @@ var elastictractor = function () {
 		});
 	};
 
-	self._hasConfig = function(event, type) {
+	self._hasConfig = function(config, event, type) {
 		var self = this
 		return new Promise((resolve, reject) => {
-			// Load configuration
-			self._init().then(config => {
-				// Keep only first pattern related the respective event _type
-				var patterns = _.filter(config.patterns, x => x.config && _.indexOf(x.config.source, type) > -1 && x.config.field && self.matches(x.config.field.regex, template(x.config.field.name, event)))
-				if (patterns.length > 0) {
-					config.patterns = patterns;
-					resolve(config);
-				} else {
-					reject("It's not configured.");
+			// Keep only first pattern related the respective event _type
+			var patterns = _.filter(config.patterns, x => {
+				// Normalize data
+				if (x.config.field.name.indexOf("$") < 0) {
+					x.config.field.name = `\$\{v.${x.config.field.name}\}`;
 				}
-			}).catch(err => {
-				reject(err);
+				return x.config && _.indexOf(x.config.source, type) > -1 && x.config.field && self.matches(x.config.field.regex, template(x.config.field.name, event))
 			})
+			if (patterns.length > 0) {
+				config.patterns = patterns;
+				resolve(config);
+			} else {
+				reject("It's not configured.");
+			}
 		})
 	}
 
@@ -481,10 +533,9 @@ var elastictractor = function () {
 				patternsInProcessing.push(new Promise((resolve, reject) => {
 					// Keep only elegible index
 					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, template(pattern.config.field.name, event)))
-
-					var logs = event[pattern.config.field.data];
-					delete event[pattern.config.field.data];
-					PromiseBB.map(logs, function(data) {
+					// Keep object as array
+					var logs = _.concat(event[pattern.config.field.data], []);
+					Promise.map(logs, function(data) {
 						data.source = template(pattern.config.field.name, event);
 						return self._parse(data, { config: pattern.config, regexp: pattern.regex });
 					}, {concurrency: 100000}).then(results => {
@@ -530,10 +581,29 @@ var elastictractor = function () {
 							output.firehose[out.arn]["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
 						} else if (out.type === "elasticsearch") {
 							// if array wasn't initialized
-							if (!output.elk) output.elk = [];
+							if (!output.elk) output.elk = {};
 							// Contructs the body object to foward to elasticsearch
-							output.elk.push({ index:  { _index: out.index, _type: "metric" } });
-							output.elk.push(_.head(result.results));
+							var index = { _index: out.index, _type: "metric" };
+							if (out.mapping) index["_type"] = out.mapping;
+							var results = _.head(result.results);
+							if (out.id) {
+								index["_id"] = out.id;
+								index = { update: index }
+								results = {doc: results}
+							} else {
+								index = { index: index }
+							}
+							var hashElkOutput = md5(out.url)
+							if (!self.clientPool[hashElkOutput]) {
+								self.clientPool[hashElkOutput] = new es.Client({
+									host: out.url,
+									log: 'warning'
+								});
+							}
+							// Recreate array if it not exists
+							if (!output.elk[hashElkOutput]) output.elk[hashElkOutput] = [];
+							output.elk[hashElkOutput].push(index);
+							output.elk[hashElkOutput].push(results);
 						}
 					})
 				});
@@ -541,25 +611,37 @@ var elastictractor = function () {
 				var processingOutput = []
 				Object.keys(output).forEach(item => {
 					if (item === "elk") {
-						//  Send documents to elasticsearch, if has one
-						if (output[item].length > 0) {
-							// Split into chunk of 500 items
-							var chunks = _.chunk(output[item], 1000)
-							processingOutput.push(PromiseBB.map(chunks, function(chunk) {
-								return new Promise((resolve, reject) => {
-									self.client.bulk({
-										body: chunk
-									}, function (error, response) {
-										if (error) {
-											console.log(error);
-											reject(error);
-										} else {
-											resolve(response);
-										}
+						Object.keys(output.elk).forEach(elkHash => {
+							//  Send documents to elasticsearch, if has one
+							if (output.elk[elkHash].length > 0) {
+								console.log(`Writting ${output.elk[elkHash].length/2} records to ELK.`);
+								// heapdump.writeSnapshot(function(err, filename) {
+								// 	console.log('dump written to', filename);
+								// });
+								// Split into chunk of 500 items
+								var chunks = _.chunk(output.elk[elkHash], 1000)
+								processingOutput.push(Promise.map(chunks, function(chunk) {
+									return new Promise((resolve, reject) => {
+										self.clientPool[elkHash].bulk({
+											body: chunk
+										}, function (error, response) {
+											if (error) {
+												console.log(error);
+												reject(error);
+											} else if (response.errors) {
+												var anError = _.head(_.filter(response.items, item => item.index.error));
+												if (anError) {
+													console.log(JSON.stringify(anError));
+													reject(anError);
+												}
+											} else {
+												resolve(response);
+											}
+										})
 									})
-								})
-							}, {concurrency: 5}));
-						}
+								}, {concurrency: 5}));
+							}
+						})
 					} else if (item === "firehose" || item === "kinesis") {
 
 						Object.keys(output[item]).forEach(stream => {
@@ -607,6 +689,11 @@ var elastictractor = function () {
 	};
 }
 
+elastictractor.prototype.init = function() {
+	var self = this
+	return self._init();
+}
+
 elastictractor.prototype.reindexESDocument = function (index, documentId) {
 	var self = this
 	return new Promise((resolve, reject) => {
@@ -645,154 +732,25 @@ elastictractor.prototype.reindexESDocument = function (index, documentId) {
  * @param  {[type]} awsLogEvent Event from CloudWatch logs
  * @return {[type]}             Promise
  */
-elastictractor.prototype.processAwsLog = function(awsLogEvent) {
+elastictractor.prototype.processAwsLog = function (config, awsLogEvent, type) {
 	var self = this
 	return new Promise((resolve, reject) => {
-		// Load configuration
-		self._init().then(config => {
-			// Keep only first pattern related to this CloudWatch logs
-			var patterns = _.filter(config.patterns, x => x.config && _.indexOf(x.config.source, "aws:awsLogs") > -1 && x.config.field && self.matches(x.config.field.regex, awsLogEvent[x.config.field.name]))
-
-			var patternsInProcessing = []
-			patterns.map(pattern => {
-				patternsInProcessing.push(new Promise((resolve, reject) => {
-					// Keep only elegible index
-					pattern.config.output = _.filter(pattern.config.field.output, x => self.matches(x.regex, awsLogEvent[x.name]))
-
-					var logs = awsLogEvent.logEvents
-					var parsing = [];
-					logs.forEach(data => {
-						data.source = awsLogEvent.logGroup
-						parsing.push(self._parse(data, { config: pattern.config, regexp: pattern.regex}));
-					})
-					// Get results after pattern was applied
-					Promise.all(parsing).then(results => {
-						// Keep only valid data
-						results = _.filter(results, x => x.results.length)
-						resolve(results);
-						parsing = null;
-						all = null;
-						patterns = null;
-					}).catch(err => {
-						reject(err);
-						parsing = null;
-						all = null;
-						patterns = null;
-					});
-				}))
-			})
-
-			Promise.all(patternsInProcessing).then(results => {
-				// Concat all results
-				results = results.reduce(function(a, b) {
-					return a.concat(b);
-				}, []);
-
-				var output = {};
-				results.forEach(result => {
-					result.output.forEach(out => {
-						if (out.type === "aws:kinesis") {
-							// if array wasn't initialized
-							if (!output.kinesis || !output.kinesis[out.arn]) {
-								if (!output.kinesis) output.kinesis = {};
-								output.kinesis[out.arn] = {
-								   "StreamName": out.arn,
-								   "Records": []
-								};
-							}
-							output.kinesis[out.arn]["Records"].push({ "PartitionKey": "results", "Data": JSON.stringify(_.head(result.results)) });
-						} else if (out.type === "aws:firehose") {
-							// if array wasn't initialized
-							if (!output.firehose || !output.firehose[out.arn]) {
-								if (!output.firehose) output.firehose = {};
-								output.firehose[out.arn] = {
-								   "DeliveryStreamName": out.arn,
-								   "Records": []
-								};
-							}
-							output.firehose[out.arn]["Records"].push({ "Data": JSON.stringify(_.head(result.results)) });
-						} else if (out.type === "elasticsearch") {
-							// if array wasn't initialized
-							if (!output.elk) output.elk = [];
-							// Contructs the body object to foward to elasticsearch
-							output.elk.push({ index:  { _index: out.index, _type: "metric" } });
-							output.elk.push(_.head(result.results));
-						}
-					})
-				});
-
-				var processingOutput = []
-				Object.keys(output).forEach(item => {
-					if (item === "elk") {
-						//  Send documents to elasticsearch, if has one
-						if (output[item].length > 0) {
-							processingOutput.push(new Promise((resolve, reject) => {
-								self.client.bulk({
-									body: output.elk
-								}, function (error, response) {
-									if (error) {
-										console.log(error);
-										reject(error);
-									} else {
-										resolve(response);
-									}
-								});
-							}))
-						}
-					} else if (item === "firehose" || item === "kinesis") {
-
-						Object.keys(output[item]).forEach(stream => {
-							processingOutput.push(new Promise((resolve, reject) => {
-								var failureName = item === "firehose" ? "FailedPutCount" : "FailedRecordCount";
-
-								var callback = function(err, data) {
-									if (err) {
-										console.log(err, err.stack);
-										reject(err);
-									} else {
-										if (data[failureName] && data[failureName] > 0) {
-											console.log(`Some records wasn't delivered, a total of ${data[failureName]}. ${JSON.stringify(data)}`)
-										}
-										console.log(`Was sent to ${item} ${output[item][stream]["Records"].length} records`)
-										resolve(data);
-									}
-								};
-
-								if (item === "firehose") {
-									firehose.putRecordBatch(output[item][stream], callback);
-								} else {
-									kinesis.putRecords(output[item][stream], callback);
-								}
-							}))
-						})
-					}
-				})
-
-				Promise.all(processingOutput).then(results => {
-					resolve(results);
-				}).catch(err => {
-					reject(err);
-					parsing = null;
-					all = null;
-					patterns = null;
-				})
+		self._hasConfig(config, awsLogEvent, type).then(config => {
+			self._processEvent(awsLogEvent, config).then(response => {
+				resolve(response);
 			}).catch(err => {
 				reject(err);
-				parsing = null;
-				all = null;
-				patterns = null;
-			});
+			})
 		}).catch(err => {
-			reject(err);
+			reject(err)
 		});
-	})
-};
+	});
+}
 
-
-elastictractor.prototype.processS3 = function(s3Event) {
+elastictractor.prototype.processS3 = function (config, s3Event, type) {
 	var self = this
 	return new Promise((resolve, reject) => {
-		self._hasConfig(s3Event, "aws:s3").then(config => {
+		self._hasConfig(config, s3Event, type).then(config => {
 			var s3Stream = s3.getObject({Bucket: s3Event.s3.bucket.name, Key: decodeURIComponent(s3Event.s3.object.key.replace(/\+/g, ' '))}).createReadStream();
 			var lineStream = new LineStream();
 			var logs = []
@@ -811,12 +769,12 @@ elastictractor.prototype.processS3 = function(s3Event) {
 	      }).on('end', function() {
 					if (logs.length > 0) {
 						var events = [];
-						var chunks = _.chunk(logs, 200000)
+						var chunks = _.chunk(logs,10000)
 						chunks.map(chunk => {
 							events.push(extend({logs: chunk}, s3Event));
 						});
 						logs = [];
-						PromiseBB.map(events, function(event) {
+						Promise.map(events, function(event) {
 							return self._processEvent(event, config)
 						}, {concurrency: 1}).then(response => {
 							resolve(response);
@@ -833,16 +791,35 @@ elastictractor.prototype.processS3 = function(s3Event) {
 	});
 };
 
-elastictractor.prototype.processSNS = function(snsEvent) {
+elastictractor.prototype.processKinesis = function (config, kinesisEvent, type) {
 	var self = this
 	return new Promise((resolve, reject) => {
-		tractor.reindexESDocument(component.Sns.Subject, component.Sns.Message).then(response => {
-			resolve(response);
+		self._hasConfig(config, kinesisEvent, type).then(config => {
+			self._processEvent(kinesisEvent, config).then(response => {
+				resolve(response);
+			}).catch(err => {
+				reject(err);
+			})
 		}).catch(err => {
-			reject(err);
+			reject(err)
 		});
 	});
-};
+}
+
+elastictractor.prototype.processEcs = function (config, ecsEvent, type) {
+	var self = this
+	return new Promise((resolve, reject) => {
+		self._hasConfig(config, ecsEvent, type).then(config => {
+			self._processEvent(extend(ecsEvent, {data: {message: JSON.stringify(ecsEvent)}}), config).then(response => {
+				resolve(response);
+			}).catch(err => {
+				reject(err);
+			})
+		}).catch(err => {
+			reject(err)
+		});
+	});
+}
 
 /*
 * Process any elasticsearch document that contains a text "error" on the field errorMessage.
