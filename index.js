@@ -15,7 +15,7 @@ console.log('Loading function');
 
 aws.config.setPromisesDependency(require('bluebird'));
 
-exports.handler = function(event, context, callback) {
+let elasticTractor = function(event, context, callback) {
     let tractor = new ElasticTractor();
     tractor.init().then(config => {
       // If it has records
@@ -128,3 +128,5 @@ exports.handler = function(event, context, callback) {
       }
     });
 };
+
+module.exports = elasticTractor
