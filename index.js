@@ -5,9 +5,7 @@ let extend = require('extend')
 const zlib = require('zlib')
 const _ = require('lodash')
 var aws = require('aws-sdk')
-var lambda = new aws.Lambda({
-  region: 'us-east-1'
-})
+var lambda = new aws.Lambda()
 var Promise = require("bluebird")
 let ElasticTractor = require(path.join(__dirname, '.', 'elastictractor.js'))
 
@@ -16,7 +14,7 @@ console.log('Loading function');
 aws.config.setPromisesDependency(require('bluebird'));
 
 let elasticTractor = function (parameters) {
-  let params = parameters;
+  this.params = parameters;
 }
 
 elasticTractor.prototype.handler = function(event, context, callback) {
