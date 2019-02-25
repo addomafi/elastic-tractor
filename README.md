@@ -16,7 +16,7 @@ Stable, but under constant development.
 ## Installation
 
 ```sh
-npm install elastic-tractor
+npm install elastictractor
 ```
 
 ## Features
@@ -31,8 +31,11 @@ npm install elastic-tractor
 It is an example to use with AWS Lambda:
 
 ```js
-// run.js
-var elasticTractor = require('elastic-tractor')
+var elasticTractor = require('elastictractor')
 
-elasticTractor(event, context, callback)
+exports.handler = function(event, context, callback) {
+  elasticTractor({
+    elkHost: process.env.ELK_HOST
+  })(event, context, callback);
+};
 ```
