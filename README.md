@@ -32,10 +32,11 @@ It is an example to use with AWS Lambda:
 
 ```js
 var elasticTractor = require('elastictractor')
+var processor = new elasticTractor({
+  elkHost: "http://localhost:9200"
+});
 
 exports.handler = function(event, context, callback) {
-  elasticTractor({
-    elkHost: process.env.ELK_HOST
-  })(event, context, callback);
+  processor.handler(event, context, callback);
 };
 ```
