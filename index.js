@@ -15,8 +15,8 @@ console.log('Loading function');
 
 aws.config.setPromisesDependency(require('bluebird'));
 
-let elasticTractor = function (params) {
-  let params = params;
+let elasticTractor = function (parameters) {
+  let params = parameters;
 }
 
 elasticTractor.prototype.handler = function(event, context, callback) {
