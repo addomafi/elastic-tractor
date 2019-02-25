@@ -15,10 +15,12 @@ console.log('Loading function');
 
 aws.config.setPromisesDependency(require('bluebird'));
 
-let elasticTractor = function(event, context, callback) {
-    let tractor = new ElasticTractor({
-      elkHost: process.env.ELK_HOST
-    });
+let elasticTractor = function (params) {
+  let params = params;
+}
+
+elasticTractor.prototype.handler = function(event, context, callback) {
+    let tractor = new ElasticTractor(this.params);
     tractor.init().then(config => {
       // If it has records
       if (event.Records) {
