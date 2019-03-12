@@ -15,7 +15,7 @@ const zlib = require('zlib');
 var Promise = require("bluebird");
 // var heapdump = require('heapdump');
 
-var elastictractor = function () {
+var elastictractor = function (params) {
 	var self = this
 
 	var template = function(tpl, args) {
@@ -31,7 +31,7 @@ var elastictractor = function () {
 	};
 
 	self.client = new es.Client({
-		host: process.env.ELK_HOST,
+		host: params.elkHost,
 		log: 'warning'
 	});
 

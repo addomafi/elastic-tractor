@@ -5,9 +5,7 @@ let extend = require('extend')
 const zlib = require('zlib')
 const _ = require('lodash')
 var aws = require('aws-sdk')
-var lambda = new aws.Lambda({
-  region: 'us-east-1'
-})
+var lambda = new aws.Lambda()
 var kplAgg = require('aws-kinesis-agg');
 var Promise = require("bluebird")
 let ElasticTractor = require(path.join(__dirname, '.', 'elastictractor.js'))
@@ -16,7 +14,15 @@ console.log('Loading function');
 
 aws.config.setPromisesDependency(require('bluebird'));
 
-let elasticTractor = function(event, context, callback) {
+let elasticTractor = function (parameters) {
+  this.params = extend({
+      maxKinesisEvents: 50,
+      concurrencyLambdaCall: 100,
+      elkHost: "http://localhost:9200/"
+    }, parameters);
+}
+
+elasticTractor.prototype.handler = function(event, context, callback) {
   var self = this
 
   self._deaggregatedKpl = function(kinesisEvent) {
@@ -64,7 +70,7 @@ let elasticTractor = function(event, context, callback) {
     });
   }
 
-  let tractor = new ElasticTractor();
+  let tractor = new ElasticTractor(this.params);
   tractor.init().then(config => {
     // If it has records
     if (event.Records) {
@@ -108,13 +114,13 @@ let elasticTractor = function(event, context, callback) {
         }), function(o) {return [o]})
 
         Promise.map(groupByKinesisEvents, function(evtGrouped) {
-          return self._prepareKinesisChunk(evtGrouped, 3)
+          return self._prepareKinesisChunk(evtGrouped, this.params.maxKinesisEvents)
         }).map(function(kinesisEvent) {
           return lambda.invoke({
               FunctionName: context.invokedFunctionArn,
               Payload: new Buffer(JSON.stringify(kinesisEvent))
             }).promise();
-        }, {concurrency: 500}).then(results => {
+        }, {concurrency: this.params.concurrencyLambdaCall}).then(results => {
           callback(null, "Success");
         }).catch(err => {
           console.log(`Occurred an error "${JSON.stringify(err)}"`)
