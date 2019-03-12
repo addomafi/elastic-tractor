@@ -1,7 +1,7 @@
 {
-  "name": "elastic-tractor",
-  "version": "0.2.0",
-  "description": "Reindex tool",
+  "name": "elastictractor",
+  "version": "1.0.0",
+  "description": "Elastic Tractor - Serverless data ingestion tool",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
