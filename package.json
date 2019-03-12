@@ -15,6 +15,7 @@
   "author": "Adauto Martins <adauto.martins@ideotech.com.br>",
   "license": "Apache-2.0",
   "dependencies": {
+    "aws-kinesis-agg": "^4.0.2",
     "aws-sdk": "^2.91.0",
     "bluebird": "^3.5.1",
     "byline": "^5.0.0",
