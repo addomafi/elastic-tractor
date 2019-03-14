@@ -59,7 +59,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
         return deAggEvent;
       }).then(results => {
         var chunks = []
-        _.chunk(results, maxEvents).forEach(chunk => {
+        _.chunk(_.flatten(results), maxEvents).forEach(chunk => {
           joined.data = _.flatten(chunk);
           chunks.add(_.cloneDeep(joined))
         });
