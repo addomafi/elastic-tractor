@@ -60,7 +60,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
       }).then(results => {
         var chunks = []
         _.chunk(results, maxEvents).forEach(chunk => {
-          joined.data = chunk;
+          joined.data = _.flatten(chunk);
           chunks.add(_.cloneDeep(joined))
         });
         resolve(chunks);
@@ -114,13 +114,15 @@ elasticTractor.prototype.handler = function(event, context, callback) {
         }), function(o) {return [o]})
 
         Promise.map(groupByKinesisEvents, function(evtGrouped) {
-          return self._prepareKinesisChunk(evtGrouped, this.params.maxKinesisEvents)
-        }).map(function(kinesisEvent) {
-          return lambda.invoke({
+          return self._prepareKinesisChunk(evtGrouped, self.params.maxKinesisEvents)
+        }).map(function(eventChunks) {
+          return Promise.map(eventChunks, function(kinesisEvent) {
+            return lambda.invoke({
               FunctionName: context.invokedFunctionArn,
               Payload: new Buffer(JSON.stringify(kinesisEvent))
             }).promise();
-        }, {concurrency: this.params.concurrencyLambdaCall}).then(results => {
+          }, {concurrency: self.params.concurrencyLambdaCall})
+        }).then(results => {
           callback(null, "Success");
         }).catch(err => {
           console.log(`Occurred an error "${JSON.stringify(err)}"`)
