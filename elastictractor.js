@@ -321,12 +321,17 @@ var elastictractor = function (params) {
 								index.id = filtered[0][item.id];
 								delete filtered[0][item.id];
 							} else {
-								// If has errorMessage attribute add prefix -error to index
-								if (filtered.length && filtered[0].errorMessage) {
-									index.index = `${item.prefix}error-${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
-								} else {
-									index.index = `${item.prefix}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
-								}
+								var getPrefix = function(prefix, event) {
+									if (prefix.indexOf("$") > -1) {
+										return template(prefix, event)
+									}
+									if (event.errorMessage) {
+										return `${prefix}error-`
+									}
+									return prefix
+								};
+
+								index.index = `${getPrefix(item.prefix, filtered[0])}${moment(data.timestamp, 'x').format('YYYY.MM.DD')}`
 							}
 							// Define document type if necessary
 							if (item.mapping) {
