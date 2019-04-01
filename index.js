@@ -85,7 +85,11 @@ elasticTractor.prototype.handler = function(event, context, callback) {
           var joined = _.cloneDeep(_.head(group))
           delete joined.kinesis.data
           _.chunk(group, maxEvents).forEach(chunk => {
-            joined.kinesis.data = _.flatten(chunk);
+            var data = []
+            _.each(chunk, item => {
+              data.add({"data": item.kinesis.data})
+            })
+            joined.data = data;
             chunks.add(_.cloneDeep(joined))
           });
         })
