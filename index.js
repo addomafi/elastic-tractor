@@ -25,7 +25,7 @@ let elasticTractor = function (parameters) {
 elasticTractor.prototype.handler = function(event, context, callback) {
   var self = this
 
-  self._deaggregatedKpl = function(kinesisEvent) {
+  self._deaggregatedKpl = function(clonedEvent, kinesisEvent) {
     return new Promise((resolve, reject) => {
       var buffer = Buffer.from(kinesisEvent.data, 'base64')
       // If it's an aggregated record
@@ -36,37 +36,65 @@ elasticTractor.prototype.handler = function(event, context, callback) {
           } else {
             var newRecords = [];
             records.forEach(record => {
-              newRecords.add({ "data": Buffer.from(record.data, 'base64').toString() });
+              // Append data
+              _.extend(clonedEvent.kinesis, {
+                "data": Buffer.from(record.data, 'base64').toString(),
+                "partitionKey": `${kinesisEvent.partitionKey}-${record.partitionKey}`
+              })
+              newRecords.add(_.cloneDeep(clonedEvent));
             })
             resolve(newRecords);
           }
         });
       } else {
-        resolve([{ "data": buffer.toString() }]);
+        // Append data
+        _.extend(clonedEvent.kinesis, {
+          "data": buffer.toString(),
+          "partitionKey": kinesisEvent.partitionKey
+        })
+        resolve([_.cloneDeep(clonedEvent)]);
       }
     })
   }
 
   self._prepareKinesisChunk = function(kinesisEvents, maxEvents) {
     return new Promise((resolve, reject) => {
-      var joined = _.cloneDeep(_.head(kinesisEvents))
-      delete joined.kinesis.data
-      var deAggPromises = []
-      kinesisEvents.forEach(kinesisEvent => {
-        deAggPromises.add(self._deaggregatedKpl(kinesisEvent.kinesis))
-      })
-      Promise.map(deAggPromises, function(deAggEvent) {
-        return deAggEvent;
-      }).then(results => {
-        var chunks = []
-        _.chunk(_.flatten(results), maxEvents).forEach(chunk => {
-          joined.data = _.flatten(chunk);
-          chunks.add(_.cloneDeep(joined))
+      var groupByKinesisEvents = _.flatMap(_.groupBy(kinesisEvents, function(value) {
+        return `${value.eventSourceARN}-${value.kinesis.partitionKey}`
+      }), function(o) {return [o]})
+
+      Promise.map(groupByKinesisEvents, function(groupedEvents) {
+        var joined = _.cloneDeep(_.head(groupedEvents))
+        delete joined.kinesis.data
+        var deAggPromises = []
+        groupedEvents.forEach(kinesisEvent => {
+          deAggPromises.add(self._deaggregatedKpl(joined, kinesisEvent.kinesis))
+        })
+        return Promise.map(deAggPromises, function(aggResult) {
+          return aggResult
         });
+      }).then(results => {
+        return _.flatten(results)
+      }).then(results => {
+        var groupByFinal = _.flatMap(_.groupBy(_.flatten(results), function(value) {
+          return `${value.eventSourceARN}-${value.kinesis.partitionKey}`
+        }), function(o) {return [o]})
+
+        var chunks = []
+        _.each(groupByFinal, function(group){
+          var joined = _.cloneDeep(_.head(group))
+          delete joined.kinesis.data
+          _.chunk(group, maxEvents).forEach(chunk => {
+            joined.kinesis.data = _.flatten(chunk);
+            chunks.add(_.cloneDeep(joined))
+          });
+        })
+        console.log(`Processing an Kinesis event, with ${chunks.length} chunks...`);
         resolve(chunks);
       }).catch(err => {
         reject(err);
       });
+
     });
   }
 
@@ -97,7 +125,6 @@ elasticTractor.prototype.handler = function(event, context, callback) {
             }
             break;
           case "aws:kinesis":
-            console.log("Processing an Kinesis event...");
             evtRecord.source = evtSrc;
             kinesisEvents.add(evtRecord);
             break;
@@ -109,20 +136,13 @@ elasticTractor.prototype.handler = function(event, context, callback) {
 
       // Check if it is an event from Kinesis
       if (kinesisEvents.length > 0) {
-        var groupByKinesisEvents = _.flatMap(_.groupBy(kinesisEvents, function(value) {
-          return value.kinesis.partitionKey
-        }), function(o) {return [o]})
-
-        Promise.map(groupByKinesisEvents, function(evtGrouped) {
-          return self._prepareKinesisChunk(evtGrouped, self.params.maxKinesisEvents)
-        }).map(function(eventChunks) {
-          return Promise.map(eventChunks, function(kinesisEvent) {
-            return lambda.invoke({
-              FunctionName: context.invokedFunctionArn,
-              Payload: new Buffer(JSON.stringify(kinesisEvent))
-            }).promise();
-          }, {concurrency: self.params.concurrencyLambdaCall})
-        }).then(results => {
+        console.log(`Processing an Kinesis event, with ${kinesisEvents.length} events...`);
+        self._prepareKinesisChunk(kinesisEvents, self.params.maxKinesisEvents).map(function(kinesisEvent) {
+          return lambda.invoke({
+            FunctionName: context.invokedFunctionArn,
+            Payload: new Buffer(JSON.stringify(kinesisEvent))
+          }).promise();
+        }, {concurrency: self.params.concurrencyLambdaCall}).then(results => {
           callback(null, "Success");
         }).catch(err => {
           console.log(`Occurred an error "${JSON.stringify(err)}"`)
