@@ -121,6 +121,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
               }).catch(err => {
                 delete evtRecord.logs;
                 console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
+                console.log(err.stack);
                 callback(null, "Success");
               });
             } else {
@@ -163,6 +164,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
               callback(null, "Success");
             }).catch(err => {
               console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(event)}`)
+              console.log(err.stack);
               callback(err, "Error");
             });
             break;
@@ -172,6 +174,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
                 callback(null, "Success");
               }).catch(err => {
                 console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(event)}`)
+                console.log(err.stack);
                 callback(err, "Error");
               });
               break;
@@ -189,11 +192,13 @@ elasticTractor.prototype.handler = function(event, context, callback) {
               callback(null, "Success");
             }).catch(err => {
               console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
+              console.log(err.stack);
               context.callbackWaitsForEmptyEventLoop = false;
               callback(null, "Success");
             });
           } else {
             console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
+            console.log(err.stack);
             context.callbackWaitsForEmptyEventLoop = false;
             callback(null, "Success");
           }

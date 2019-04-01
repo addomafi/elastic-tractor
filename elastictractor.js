@@ -325,7 +325,7 @@ var elastictractor = function (params) {
 									if (prefix.indexOf("$") > -1) {
 										return template(prefix, event)
 									}
-									if (event.errorMessage) {
+									if (event && event.errorMessage) {
 										return `${prefix}error-`
 									}
 									return prefix
