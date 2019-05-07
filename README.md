@@ -28,12 +28,42 @@ npm install elastictractor
 
 ## Introduction
 
-It is an example to use with AWS Lambda:
+It is a simple example to use with AWS Lambda:
 
 ```js
 var elasticTractor = require('elastictractor')
 var processor = new elasticTractor({
   elkHost: "http://localhost:9200"
+});
+
+exports.handler = function(event, context, callback) {
+  processor.handler(event, context, callback);
+};
+```
+
+It is a basic authentication example to use with AWS Lambda:
+
+```js
+var elasticTractor = require('elastictractor')
+var processor = new elasticTractor({
+  elkHost: "http://localhost:9200",
+  username: "test",
+  password: "123"
+});
+
+exports.handler = function(event, context, callback) {
+  processor.handler(event, context, callback);
+};
+```
+
+It is a cloud example to use with AWS Lambda:
+
+```js
+var elasticTractor = require('elastictractor')
+var processor = new elasticTractor({
+  cloudId: "name:SJHSJSHJSHHDIhb23331=",
+  username: "test",
+  password: "123"
 });
 
 exports.handler = function(event, context, callback) {

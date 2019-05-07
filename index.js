@@ -17,7 +17,10 @@ let elasticTractor = function (parameters) {
   this.params = extend({
       maxKinesisEvents: 50,
       concurrencyLambdaCall: 100,
-      elkHost: "http://localhost:9200/",
+      elkHost: undefined,
+      cloudId: undefined,
+      username: undefined,
+      password: undefined,
       logName: "elastic-tractor",
       logLevel: "info"
     }, parameters);

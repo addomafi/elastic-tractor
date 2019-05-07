@@ -1,3 +1,4 @@
+let url = require('url');
 let path = require('path')
 let es = require('elasticsearch')
 let grok = require('node-grok')
@@ -34,10 +35,26 @@ var elastictractor = function (params) {
 		}
 	};
 
-	self.client = new es.Client({
-		host: params.elkHost,
-		log: 'warning'
-	});
+	// Treat as standard server
+	if (params.elkHost) {
+		var urlEs = url.parse(params.elkHost)
+		if (params.username) urlEs.username = params.username;
+		if (params.password) urlEs.password = params.password;
+
+		self.client = new es.Client({
+			node: {
+    		url: urlEs
+			}
+		});
+	} else if (params.cloudId) {
+		self.client = new es.Client({
+		  cloud: {
+		    id: params.cloudId,
+		    username: params.username,
+		    password: params.password
+		  }
+		});
+	}
 
 	self.clientPool = {};
 
