@@ -7,7 +7,7 @@ const _ = require('lodash')
 var aws = require('aws-sdk')
 var lambda = new aws.Lambda()
 var kplAgg = require('aws-kinesis-agg');
-var log = require(path.join(__dirname, '.', 'log.js'));
+var Logger = require(path.join(__dirname, '.', 'log.js'));
 var Promise = require("bluebird")
 let ElasticTractor = require(path.join(__dirname, '.', 'elastictractor.js'))
 
@@ -21,7 +21,7 @@ let elasticTractor = function (parameters) {
       logName: "elastic-tractor",
       logLevel: "info"
     }, parameters);
-  this._logger = log(this.params);
+  this._logger = new Logger(this.params);
 }
 
 elasticTractor.prototype.handler = function(event, context, callback) {
