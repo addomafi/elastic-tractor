@@ -11,4 +11,4 @@ var logger = function(parameters) {
   return bunyan.createLogger({name: params.logName, level: params.logLevel});
 }
 
-module.export = logger
+module.exports = logger
