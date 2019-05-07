@@ -18,6 +18,7 @@
     "aws-kinesis-agg": "^4.0.2",
     "aws-sdk": "^2.91.0",
     "bluebird": "^3.5.1",
+    "bunyan": "^1.8.12",
     "byline": "^5.0.0",
     "elasticsearch": "^13.2.0",
     "extend": "^3.0.1",

@@ -7,10 +7,9 @@ const _ = require('lodash')
 var aws = require('aws-sdk')
 var lambda = new aws.Lambda()
 var kplAgg = require('aws-kinesis-agg');
+var log = require(path.join(__dirname, '.', 'log.js'));
 var Promise = require("bluebird")
 let ElasticTractor = require(path.join(__dirname, '.', 'elastictractor.js'))
-
-console.log('Loading function');
 
 aws.config.setPromisesDependency(require('bluebird'));
 
@@ -18,8 +17,11 @@ let elasticTractor = function (parameters) {
   this.params = extend({
       maxKinesisEvents: 50,
       concurrencyLambdaCall: 100,
-      elkHost: "http://localhost:9200/"
+      elkHost: "http://localhost:9200/",
+      logName: "elastic-tractor",
+      logLevel: "info"
     }, parameters);
+  this._logger = log(this.params);
 }
 
 elasticTractor.prototype.handler = function(event, context, callback) {
@@ -93,7 +95,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
             chunks.add(_.cloneDeep(joined))
           });
         })
-        console.log(`Processing an Kinesis event, with ${chunks.length} chunks...`);
+        self._logger.info(`Processing an Kinesis event, with ${chunks.length} chunks...`);
         resolve(chunks);
       }).catch(err => {
         reject(err);
@@ -114,18 +116,17 @@ elasticTractor.prototype.handler = function(event, context, callback) {
         }
         switch(evtSrc) {
           case "aws:s3":
-            console.log(`Processing an S3 event... ${evtRecord.s3.object.key}`);
+            self._logger.info(`Processing an S3 event... ${evtRecord.s3.object.key}`);
             if (evtRecord.s3.object.size > 0) {
               tractor.processS3(config, evtRecord, evtSrc).then(results => {
                 callback(null, "Success");
               }).catch(err => {
                 delete evtRecord.logs;
-                console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(evtRecord)}`)
-                console.log(err.stack);
+                self._logger.error(err, `Occurred an error on event ${JSON.stringify(evtRecord)}`)
                 callback(null, "Success");
               });
             } else {
-              console.log("Log size is zero");
+              self._logger.error("Log size is zero");
               callback(null, "Success");
             }
             break;
@@ -134,14 +135,14 @@ elasticTractor.prototype.handler = function(event, context, callback) {
             kinesisEvents.add(evtRecord);
             break;
           default:
-            console.log(`Event source "${evtRecord.eventSource}" is not supported. Event: ${JSON.stringify(evtRecord)}`)
+            self._logger.info(`Event source "${evtRecord.eventSource}" is not supported. Event: ${JSON.stringify(evtRecord)}`)
             callback(null, "Success");
         }
       })
 
       // Check if it is an event from Kinesis
       if (kinesisEvents.length > 0) {
-        console.log(`Processing an Kinesis event, with ${kinesisEvents.length} events...`);
+        self._logger.info(`Processing an Kinesis event, with ${kinesisEvents.length} events...`);
         self._prepareKinesisChunk(kinesisEvents, self.params.maxKinesisEvents).map(function(kinesisEvent) {
           return lambda.invoke({
             FunctionName: context.invokedFunctionArn,
@@ -150,7 +151,7 @@ elasticTractor.prototype.handler = function(event, context, callback) {
         }, {concurrency: self.params.concurrencyLambdaCall}).then(results => {
           callback(null, "Success");
         }).catch(err => {
-          console.log(`Occurred an error "${JSON.stringify(err)}"`)
+          self._logger.error(err, `Occurred an error on kinesis event ${JSON.stringify(kinesisEvent)}`)
           // Discard errors
           callback(null, "Error");
         });
@@ -163,42 +164,38 @@ elasticTractor.prototype.handler = function(event, context, callback) {
             tractor.processEcs(config, event, event.source).then(results => {
               callback(null, "Success");
             }).catch(err => {
-              console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(event)}`)
-              console.log(err.stack);
+              self._logger.error(err, `Occurred an error on event ${JSON.stringify(event)}`)
               callback(err, "Error");
             });
             break;
             case "aws:kinesis":
-              console.log("Processing an Kinesis event...");
+              self._logger.info("Processing an Kinesis event...");
               tractor.processKinesis(config, event, event.source).then(results => {
                 callback(null, "Success");
               }).catch(err => {
-                console.log(`Occurred an error "${JSON.stringify(err)}" on event ${JSON.stringify(event)}`)
-                console.log(err.stack);
-                callback(err, "Error");
+                self._logger.error(err, `Occurred an error on event ${JSON.stringify(event)}`)
+                callback(null, "Error");
               });
               break;
           default:
-            console.log(`Event source "${event.source}" is not supported. Event: ${JSON.stringify(event)}`)
+            self._logger.info(`Event source "${event.source}" is not supported. Event: ${JSON.stringify(event)}`)
             callback(null, "Success");
         }
       } else {
         var buffer = Buffer.from(event.awslogs.data, 'base64')
-        console.log("Processing an Cloudwatch Log event...");
+        self._logger.info("Processing an Cloudwatch Log event...");
         zlib.unzip(buffer, (err, buffer) => {
           if (!err) {
             tractor.processAwsLog(config, JSON.parse(buffer.toString()), "aws:awsLogs").then(results => {
               context.callbackWaitsForEmptyEventLoop = false;
               callback(null, "Success");
             }).catch(err => {
-              console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
-              console.log(err.stack);
+              self._logger.error(err, `Occurred an error on aws-logs ${buffer.toString()}`)
               context.callbackWaitsForEmptyEventLoop = false;
               callback(null, "Success");
             });
           } else {
-            console.log(`Occurred an error "${JSON.stringify(err)}" on aws-logs ${buffer.toString()}`)
-            console.log(err.stack);
+            self._logger.error(err, `Occurred an error on aws-logs ${buffer.toString()}`)
             context.callbackWaitsForEmptyEventLoop = false;
             callback(null, "Success");
           }

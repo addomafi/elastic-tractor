@@ -13,10 +13,13 @@ var LineStream = require('byline').LineStream;
 var stream = require('stream');
 const zlib = require('zlib');
 var Promise = require("bluebird");
+var log = require(path.join(__dirname, '.', 'log.js'));
+
 // var heapdump = require('heapdump');
 
 var elastictractor = function (params) {
 	var self = this
+	self._logger = log(params);
 
 	var template = function(tpl, args) {
 		var value = {v: args, require: require}
@@ -68,7 +71,7 @@ var elastictractor = function (params) {
 									patterns.push(extend({
 									}, JSON.parse(item["_source"].patternJSON)))
 								} catch (err) {
-									console.log(`Error to parse a JSON pattern "${item["_source"].patternJSON}"`)
+									self._logger.error(`Error to parse a JSON pattern "${item["_source"].patternJSON}"`)
 								}
 							})
 
@@ -87,7 +90,7 @@ var elastictractor = function (params) {
 											self.config.grokPatterns.createPattern(item["_source"].pattern, item["_id"])
 										}
 									})
-									console.log("Loaded");
+									self._logger.debug("Loaded grok pattern... ", bodyGrok);
 									resolve(self.config);
 								}
 							});
@@ -95,11 +98,11 @@ var elastictractor = function (params) {
 							reject("Extractor patterns wasn't defined, please define it firstly.");
 						}
 	        }, function (error) {
-						console.log(error);
+						self._logger.error(error);
 	          reject(error.message);
 	        })
 				}, function (error) {
-					console.log(error);
+					self._logger.debug(error);
           reject(error.message);
         })
 			} else {
@@ -111,7 +114,7 @@ var elastictractor = function (params) {
 	self._getDocumentToReindex = function (index, options) {
 		return new Promise((resolve, reject) => {
 			var currentMaxTimestamp = options.minTimestamp + (60000 * 60);
-			console.log(`Processing ${index} minTimestamp ${options.minTimestamp} maxTimestamp ${currentMaxTimestamp}`);
+			self._logger.info(`Processing ${index} minTimestamp ${options.minTimestamp} maxTimestamp ${currentMaxTimestamp}`);
 			self.client.search({
 				index: index,
 				body: {
@@ -144,7 +147,7 @@ var elastictractor = function (params) {
 					response = null;
 				} else {
 					options.minTimestamp = currentMaxTimestamp;
-					console.log("Without items to be processed!");
+					self._logger.debug("Without items to be processed!");
 					reject("Without items to be processed!");
 					response = null;
 				}
@@ -189,7 +192,7 @@ var elastictractor = function (params) {
 			if (!pattern) pattern = self.config.grokPatterns.createPattern(regex, md5(regex));
 			pattern.parse(data, function (err, obj) {
 					if (err) {
-						console.log(err);
+						self._logger.debug(err);
 					}
 					// Replace timestamp if data has one
 					if (obj && timestamp) {
@@ -244,10 +247,21 @@ var elastictractor = function (params) {
 										try {
 											extend(filtered[0], JSON.parse(filtered[0][key]))
 										} catch(e) {
-											// console.log(e)
+											// self._logger.debug(e)
 										}
 
 										delete filtered[0][key]
+									})
+								}
+								if (onSuccess.gunzip) {
+									onSuccess.gunzip.map(key => {
+										try {
+							        var additionalData = JSON.parse(zlib.unzipSync(new Buffer(filtered[0][key], "base64")))
+											delete filtered[0][key]
+							        var newRecord = extend(filtered[0], additionalData)
+							      } catch (err) {
+							        self._logger.info(err, "Error occurred during gunzip");
+							      }
 									})
 								}
 								if (onSuccess.add) {
@@ -298,8 +312,7 @@ var elastictractor = function (params) {
 								}
 							}
 						} catch (err) {
-							console.log(`An error occurred during onSuccess step: ${err.message}`);
-							console.log(err.stack)
+							self._logger.info(err, "An error occurred during onSuccess step");
 							// Discard the Data
 							filtered = []
 						}
@@ -487,7 +500,7 @@ var elastictractor = function (params) {
 								body: body
 							}, function (error, response) {
 								if (error) {
-									console.log(error);
+									self._logger.error(error);
 									reject(error);
 								} else {
 									resolve(response);
@@ -496,15 +509,15 @@ var elastictractor = function (params) {
 						}
 
 					}).catch(err => {
-						console.log(err);
+						self._logger.error(err);
 						reject(err);
 					});
 				}).catch(err => {
-					console.log(err);
+					self._logger.error(err);
 					reject(err);
 				});
 			}).catch(err => {
-				console.log(err);
+				self._logger.error(err);
 				reject(err);
 			});
 		});
@@ -619,9 +632,9 @@ var elastictractor = function (params) {
 						Object.keys(output.elk).forEach(elkHash => {
 							//  Send documents to elasticsearch, if has one
 							if (output.elk[elkHash].length > 0) {
-								console.log(`Writting ${output.elk[elkHash].length/2} records to ELK.`);
+								self._logger.info(`Writting ${output.elk[elkHash].length/2} records to ELK.`);
 								// heapdump.writeSnapshot(function(err, filename) {
-								// 	console.log('dump written to', filename);
+								// 	self._logger.info('dump written to', filename);
 								// });
 								// Split into chunk of 500 items
 								var chunks = _.chunk(output.elk[elkHash], 1000)
@@ -631,12 +644,12 @@ var elastictractor = function (params) {
 											body: chunk
 										}, function (error, response) {
 											if (error) {
-												console.log(error);
+												self._logger.error(error);
 												reject(error);
 											} else if (response.errors) {
 												var anError = _.head(_.filter(response.items, item => item.index.error));
 												if (anError) {
-													console.log(JSON.stringify(anError));
+													self._logger.error(anError);
 													reject(anError);
 												}
 											} else {
@@ -655,13 +668,13 @@ var elastictractor = function (params) {
 
 								var callback = function(err, data) {
 									if (err) {
-										console.log(err, err.stack);
+										self._logger.error(err);
 										reject(err);
 									} else {
 										if (data[failureName] && data[failureName] > 0) {
-											console.log(`Some records wasn't delivered, a total of ${data[failureName]}. ${JSON.stringify(data)}`)
+											self._logger.error(`Some records wasn't delivered, a total of ${data[failureName]}. ${JSON.stringify(data)}`)
 										}
-										console.log(`Was sent to ${item} ${output[item][stream]["Records"].length} records`)
+										self._logger.info(`Was sent to ${item} ${output[item][stream]["Records"].length} records`)
 										resolve(data);
 									}
 								};
@@ -847,11 +860,11 @@ elastictractor.prototype.processESBacklog = function (index) {
 					var overloadCall = function(index, options) {
 						self._processESDocumentBacklog(index, options).then(results => {
 							if (!(options.minTimestamp < options.maxTimestamp)) {
-								console.log('Finish');
+								self._logger.info('Finish');
 								resolve(results);
 							} else {
 								// heapdump.writeSnapshot(function(err, filename) {
-								// 	console.log('dump written to', filename);
+								// 	self._logger.info('dump written to', filename);
 								// });
 								overloadCall(index, options);
 							}
@@ -859,7 +872,7 @@ elastictractor.prototype.processESBacklog = function (index) {
 							if (options.minTimestamp < options.maxTimestamp) {
 								overloadCall(index, options);
 							} else {
-								console.log('Finish');
+								self._logger.info('Finish');
 								resolve('Finish');
 							}
 						});
@@ -868,14 +881,14 @@ elastictractor.prototype.processESBacklog = function (index) {
 						overloadCall(index, options);
 					}
 				}).catch(err => {
-					console.log(err);
+					self._logger.error(err);
 					reject(err);
 				});
 			} else {
 				reject("Document not found");
 			}
 		}).catch(err => {
-			console.log(err);
+			self._logger.error(err);
 			reject(err);
 		});
 	});
