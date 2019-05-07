@@ -1,3 +1,4 @@
+let path = require('path')
 let es = require('elasticsearch')
 let grok = require('node-grok')
 let _ = require('lodash');
