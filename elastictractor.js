@@ -37,14 +37,13 @@ var elastictractor = function (params) {
 
 	// Treat as standard server
 	if (params.elkHost) {
-		var urlEs = url.parse(params.elkHost)
+		// TODO: Reviem this
+		/*var urlEs = url.parse(params.elkHost)
 		if (params.username) urlEs.username = params.username;
-		if (params.password) urlEs.password = params.password;
+		if (params.password) urlEs.password = params.password;*/
 
 		self.client = new es.Client({
-			node: {
-    		url: urlEs
-			}
+			host: params.elkHost
 		});
 	} else if (params.cloudId) {
 		self.client = new es.Client({
