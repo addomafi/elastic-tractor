@@ -217,7 +217,7 @@ var elastictractor = function (params) {
 					}
 					resolve(obj);
 			});
-		});
+		}).timeout(params.parseTimeout);
 	}
 
 	/**

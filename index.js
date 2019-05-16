@@ -22,7 +22,8 @@ let elasticTractor = function (parameters) {
       username: undefined,
       password: undefined,
       logName: "elastic-tractor",
-      logLevel: "info"
+      logLevel: "info",
+      parseTimeout: 30000
     }, parameters);
   this._logger = log(this.params);
 }
