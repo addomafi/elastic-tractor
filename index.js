@@ -18,6 +18,7 @@ let elasticTractor = function (parameters) {
       maxKinesisEvents: 50,
       concurrencyLambdaCall: 100,
       elkHost: undefined,
+      elkVersion: 0,
       cloudId: undefined,
       username: undefined,
       password: undefined,
