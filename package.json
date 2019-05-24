@@ -28,6 +28,7 @@
     "maxmind": "^2.7.0",
     "md5": "^2.2.1",
     "moment": "^2.19.3",
+    "nanoid": "^2.0.3",
     "node-grok": "^2.0.3",
     "oniguruma": "^7.0.1",
     "optimist": "^0.6.1",

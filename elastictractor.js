@@ -15,6 +15,7 @@ var LineStream = require('byline').LineStream;
 var stream = require('stream');
 const zlib = require('zlib');
 var Promise = require("bluebird");
+const nanoid = require('nanoid');
 var log = require(path.join(__dirname, '.', 'log.js'));
 
 // var heapdump = require('heapdump');
@@ -603,7 +604,7 @@ var elastictractor = function (params) {
 								   "Records": []
 								};
 							}
-							output.kinesis[out.arn]["Records"].push({ "PartitionKey": "results", "Data": JSON.stringify(_.head(result.results)) });
+							output.kinesis[out.arn]["Records"].push({ "PartitionKey": nanoid(10), "Data": JSON.stringify(_.head(result.results)) });
 						} else if (out.type === "aws:firehose") {
 							// if array wasn't initialized
 							if (!output.firehose || !output.firehose[out.arn]) {
