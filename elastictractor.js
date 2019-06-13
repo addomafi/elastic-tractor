@@ -395,7 +395,7 @@ var elastictractor = function (params) {
 						}
 						resolve(parsedObj)
 					}).catch(err => {
-						reject(err)
+						resolve(parsedObj)
 					})
 				} else {
 					// Check output type
