@@ -669,12 +669,12 @@ var elastictractor = function (params) {
 										}, function (error, response) {
 											if (error) {
 												self._logger.error(error);
-												reject(error);
+												resolve(error);
 											} else if (response.errors) {
 												var anError = _.head(_.filter(response.items, item => item.index.error));
 												if (anError) {
 													self._logger.error(anError);
-													reject(anError);
+													resolve(anError);
 												}
 											} else {
 												resolve(response);
