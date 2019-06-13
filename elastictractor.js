@@ -395,6 +395,10 @@ var elastictractor = function (params) {
 						}
 						resolve(parsedObj)
 					}).catch(err => {
+						// Check output type
+						if (pattern.config.output) {
+							generateOutput(parsedObj);
+						}
 						resolve(parsedObj)
 					})
 				} else {
