@@ -624,8 +624,11 @@ var elastictractor = function (params) {
 							if (!output.elk) output.elk = {};
 							// Contructs the body object to foward to elasticsearch
 							var index = { _index: out.index };
-							if (params.elkVersion < 7 && out.mapping) {
-								index["_type"] = out.mapping;
+							var index = { _index: out.index, _type: "metric" };
+							if (out.mapping) index["_type"] = out.mapping;
+							// ELK 7+ doens't support type anymore
+							if (params.elkVersion >= 7) {
+								delete index["_type"];
 							}
 							var results = _.head(result.results);
 							if (out.id) {
