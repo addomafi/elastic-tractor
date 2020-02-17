@@ -10,7 +10,8 @@
     "tractor",
     "consolidator",
     "elasticsearch",
-    "reindex"
+    "reindex",
+    "grok"
   ],
   "author": "Adauto Martins <adauto.martins@ideotech.com.br>",
   "license": "Apache-2.0",
